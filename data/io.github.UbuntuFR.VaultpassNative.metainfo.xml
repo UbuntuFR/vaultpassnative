@@ -2,24 +2,32 @@
 <component type="desktop-application">
   <id>io.github.UbuntuFR.VaultpassNative</id>
   <name>VaultPass</name>
-  <summary>Gestionnaire de mots de passe sécurisé</summary>
+  <summary>Secure password manager for GNOME</summary>
   <description>
-    <p>VaultPass est un gestionnaire de mots de passe natif pour GNOME.</p>
+    <p>VaultPass is a native GNOME password manager that stores your credentials securely using the system keyring. It provides a simple and intuitive interface to manage all your passwords in one place.</p>
   </description>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <developer id="io.github.vaultpass">
-    <name>VaultPass Contributors</name>
+  <developer id="io.github.ubuntufr">
+    <name>UbuntuFR</name>
   </developer>
   <launchable type="desktop-id">io.github.UbuntuFR.VaultpassNative.desktop</launchable>
-  <url type="homepage">https://github.com/vaultpass/vaultpass-native</url>
-  <url type="bugtracker">https://github.com/vaultpass/vaultpass-native/issues</url>
+  <url type="homepage">https://github.com/UbuntuFR/vaultpassnative</url>
+  <url type="bugtracker">https://github.com/UbuntuFR/vaultpassnative/issues</url>
+  <url type="vcs-browser">https://github.com/UbuntuFR/vaultpassnative</url>
   <releases>
-    <release version="0.1.0" date="2026-03-13"/>
+    <release version="0.1.0" date="2026-03-13">
+      <description><p>Initial release.</p></description>
+    </release>
   </releases>
   <content_rating type="oars-1.1"/>
   <supports>
     <control>pointing</control>
     <control>keyboard</control>
   </supports>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/UbuntuFR/vaultpassnative/main/data/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
 </component>
