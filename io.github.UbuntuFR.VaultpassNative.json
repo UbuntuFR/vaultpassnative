@@ -1,0 +1,93 @@
+{
+  "app-id": "io.github.UbuntuFR.VaultpassNative",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "48",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-nightly"
+  ],
+  "command": "vaultpass-native",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--filesystem=~/.local/share/vaultpass:create",
+    "--own-name=io.github.UbuntuFR.VaultpassNative",
+    "--env=LIBGL_ALWAYS_SOFTWARE=1"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-nightly/bin",
+    "env": {
+      "RUST_BACKTRACE": "1"
+    }
+  },
+  "modules": [
+    {
+      "name": "libsass",
+      "buildsystem": "simple",
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/sass/libsass/archive/3.6.6/libsass-3.6.6.tar.gz",
+          "sha256": "11f0bb3709a4f20285507419d7618f3877a425c0131ea8df40fe6196129df15d"
+        }
+      ],
+      "build-commands": [
+        "BUILD=shared make -j$(nproc)",
+        "make install PREFIX=/app",
+        "cp -r include/. /app/include/"
+      ]
+    },
+    {
+      "name": "sassc",
+      "buildsystem": "simple",
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/sass/sassc/archive/3.6.2/sassc-3.6.2.tar.gz",
+          "sha256": "608dc9002b45a91d11ed59e352469ecc05e4f58fc1259fc9a9f5b8f0f8348a03"
+        }
+      ],
+      "build-commands": [
+        "gcc -O2 -I/app/include -o sassc sassc.c -L/app/lib -lsass -lstdc++ -lm -Wl,-rpath,/app/lib",
+        "install -Dm755 sassc /app/bin/sassc"
+      ]
+    },
+    {
+      "name": "libadwaita",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Dtests=false",
+        "-Dexamples=false",
+        "-Dvapi=false",
+        "-Dgtk_doc=false"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://download.gnome.org/sources/libadwaita/1.7/libadwaita-1.7.12.tar.xz",
+          "sha256": "94c41ab41c2d2188af8290ac0dbb906896cf75e76e69722c2ea2572531de3308"
+        }
+      ]
+    },
+    {
+      "name": "vaultpass-native",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo --offline build --release",
+        "install -Dm755 target/release/vaultpass-native /app/bin/vaultpass-native"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "."
+        }
+      ],
+      "post-install": [
+        "mkdir -p /app/share/dbus-1/services",
+        "printf \"[D-BUS Service]\nName=io.github.UbuntuFR.VaultpassNative\nExec=/app/bin/vaultpass-native\n\" > /app/share/dbus-1/services/io.github.UbuntuFR.VaultpassNative.service"
+      ]
+    }
+  ]
+}
