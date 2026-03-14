@@ -701,11 +701,12 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
 
 // ── PARAMÈTRES ─────────────────────────────────────────────────────────────────
 pub fn show_settings_dialog(
-    parent: &impl IsA<gtk4::Widget>,
-    store:  Rc<VaultStore>,
-    key:    Rc<Zeroizing<[u8; 32]>>,
-    window: Rc<libadwaita::ApplicationWindow>,
-    prefs:  Rc<std::cell::RefCell<Prefs>>,
+    parent:   &impl IsA<gtk4::Widget>,
+    store:    Rc<VaultStore>,
+    key:      Rc<Zeroizing<[u8; 32]>>,
+    window:   Rc<libadwaita::ApplicationWindow>,
+    prefs:    Rc<std::cell::RefCell<Prefs>>,
+    autolock: Rc<crate::ui::autolock::AutoLock>,
 ) {
     let (dialog, toolbar) = make_toolbar_dialog("⚙️ Paramètres", 460);
 
@@ -858,12 +859,15 @@ pub fn show_settings_dialog(
         rw.set_child(Some(&row));
         lock_list.append(&rw);
     }
-    let prefs_lk = prefs.clone();
+    let prefs_lk    = prefs.clone();
+    let autolock_lk = autolock.clone();
     lock_list.connect_row_activated(move |_, row| {
         let delays = LockDelay::all();
         if let Some(d) = delays.get(row.index() as usize) {
-            prefs_lk.borrow_mut().lock_delay_secs = *d as u64;
+            let secs = *d as u64;
+            prefs_lk.borrow_mut().lock_delay_secs = secs;
             prefs_lk.borrow().save();
+            autolock_lk.set_delay(secs);
         }
     });
     vbox.append(&lock_list);

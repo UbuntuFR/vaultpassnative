@@ -61,8 +61,9 @@ fn build_ui(app: &Application) {
         .default_height(560)
         .build());
     window.set_content(Some(&build_login_screen(window.clone())));
-    let _autolock = setup_autolock(window.upcast_ref::<gtk4::Window>(), window.clone());
+    let autolock = setup_autolock(window.upcast_ref::<gtk4::Window>(), window.clone());
     window.present();
+    let _ = &autolock; // maintenir en vie pour toute la durée de l'app
 }
 
 fn initial_color(title: &str) -> &'static str {
@@ -184,10 +185,11 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
 }
 
 fn build_vault(
-    store:  Rc<VaultStore>,
-    key:    Rc<Zeroizing<[u8; 32]>>,
-    window: Rc<ApplicationWindow>,
-    prefs:  Rc<RefCell<Prefs>>,
+    store:    Rc<VaultStore>,
+    key:      Rc<Zeroizing<[u8; 32]>>,
+    window:   Rc<ApplicationWindow>,
+    prefs:    Rc<RefCell<Prefs>>,
+    autolock: Rc<ui::autolock::AutoLock>,
 ) -> ToolbarView {
     let db_entries = Rc::new(RefCell::new(store.list_entries().unwrap_or_default()));
 
@@ -244,15 +246,17 @@ fn build_vault(
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
-    let store_s = store.clone();
-    let key_s   = key.clone();
-    let ws      = window.clone();
-    let prefs_s = prefs.clone();
+    let store_s    = store.clone();
+    let key_s      = key.clone();
+    let ws         = window.clone();
+    let prefs_s    = prefs.clone();
+    let autolock_s = autolock.clone();
     settings_list.connect_row_activated(move |_, _| {
         ui::dialogs::show_settings_dialog(
             ws.upcast_ref::<gtk4::Widget>(),
             store_s.clone(), key_s.clone(), ws.clone(),
             prefs_s.clone(),
+            autolock_s.clone(),
         );
     });
 
@@ -547,7 +551,8 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
             Err(e)    => { err.set_text(&format!("❌ Vérif : {e}")); err.set_visible(true); return; }
         }
 
-        let vault = build_vault(store, key, win.clone(), Rc::new(std::cell::RefCell::new(Prefs::load())));
+        let al = setup_autolock(win.upcast_ref::<gtk4::Window>(), win.clone());
+        let vault = build_vault(store, key, win.clone(), Rc::new(std::cell::RefCell::new(Prefs::load())), al);
         win.set_content(Some(&vault));
         win.set_default_size(1024, 680);
         win.set_size_request(800, 500);
