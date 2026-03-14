@@ -15,6 +15,8 @@ use zeroize::Zeroizing;
 
 use crate::crypto::cipher;
 use crate::database::{store::VaultStore, models::{VaultEntry, EntryId}};
+use crate::database::custom_fields::{EntrySecrets, CustomField, FieldKind};
+use crate::database::importer;
 use crate::ui::generator::GeneratorConfig;
 use crate::ui::vault_context::VaultContext;
 use crate::ui::prefs::Prefs;
@@ -55,31 +57,35 @@ struct EntryFormData {
     password: String,
     url:      Option<String>,
     category: String,
-    notes:    Option<String>,
+    secrets:  EntrySecrets,   // notes + champs custom
 }
 
 impl EntryFormData {
     fn read(
-        f_title: &EntryRow,
-        f_user:  &EntryRow,
-        f_pass:  &PasswordEntryRow,
-        f_url:   &EntryRow,
-        f_cat:   &EntryRow,
-        f_notes: &EntryRow,
+        f_title:  &EntryRow,
+        f_user:   &EntryRow,
+        f_pass:   &PasswordEntryRow,
+        f_url:    &EntryRow,
+        f_cat:    &EntryRow,
+        f_notes:  &EntryRow,
+        cf_store: &Rc<std::cell::RefCell<Vec<CustomField>>>,
     ) -> Option<Self> {
         let title    = f_title.text().to_string();
         let password = f_pass.text().to_string();
         if title.is_empty() || password.is_empty() { return None; }
-        let url   = Some(f_url.text().to_string()).filter(|s| !s.is_empty());
-        let notes = Some(f_notes.text().to_string()).filter(|s| !s.is_empty());
-        let cat   = f_cat.text().to_string();
+        let url = Some(f_url.text().to_string()).filter(|s| !s.is_empty());
+        let cat = f_cat.text().to_string();
+        let secrets = EntrySecrets {
+            notes:  f_notes.text().to_string(),
+            fields: cf_store.borrow().clone(),
+        };
         Some(Self {
             title,
             username: f_user.text().to_string(),
             password,
             url,
             category: if cat.is_empty() { "Général".to_string() } else { cat },
-            notes,
+            secrets,
         })
     }
 
@@ -90,8 +96,11 @@ impl EntryFormData {
         created_at: i64,
     ) -> Option<VaultEntry> {
         let pw_enc    = cipher::encrypt(key, self.password.as_bytes()).ok()?;
-        let notes_enc = self.notes.as_ref()
-            .and_then(|n| cipher::encrypt(key, n.as_bytes()).ok());
+        let notes_enc = {
+            let json = self.secrets.to_json().ok()?;
+            let empty = EntrySecrets::default().to_json().ok()?;
+            if json != empty { Some(cipher::encrypt(key, &json).ok()?) } else { None }
+        };
         Some(VaultEntry {
             id,
             title:              self.title.clone(),
@@ -106,17 +115,239 @@ impl EntryFormData {
     }
 }
 
+// ── Widget liste de champs custom ────────────────────────────────────────────
+fn build_custom_fields_section(
+    vbox:     &GtkBox,
+    fields:   Rc<std::cell::RefCell<Vec<CustomField>>>,
+    key_hint: &str,   // juste pour le titre de section
+) {
+    let _ = key_hint;
+
+    let hdr = GtkBox::new(Orientation::Horizontal, 8);
+    hdr.set_margin_top(12);
+    hdr.append(&Label::builder()
+        .label("Champs personnalisés")
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build());
+
+    let add_field_btn = Button::from_icon_name("list-add-symbolic");
+    add_field_btn.add_css_class("flat");
+    add_field_btn.set_tooltip_text(Some("Ajouter un champ"));
+    hdr.append(&add_field_btn);
+    vbox.append(&hdr);
+
+    let cf_list = gtk4::ListBox::new();
+    cf_list.add_css_class("boxed-list");
+    vbox.append(&cf_list);
+
+    // Rendre la liste accessible dans les closures
+    let cf_list_rc = Rc::new(cf_list.clone());
+
+    // Fonction pour redessiner la liste
+    let fields2  = fields.clone();
+    let list_rc2 = cf_list_rc.clone();
+    let redraw = Rc::new(move || {
+        // Vider
+        while let Some(child) = list_rc2.first_child() {
+            list_rc2.remove(&child);
+        }
+        for (idx, field) in fields2.borrow().iter().enumerate() {
+            let row_box = GtkBox::new(Orientation::Horizontal, 6);
+            row_box.set_margin_top(8); row_box.set_margin_bottom(8);
+            row_box.set_margin_start(12); row_box.set_margin_end(8);
+
+            // Icône type
+            let icon = gtk4::Image::from_icon_name(field.kind.icon());
+            row_box.append(&icon);
+
+            // Label + valeur
+            let text_box = GtkBox::new(Orientation::Vertical, 2);
+            text_box.set_hexpand(true);
+            text_box.append(&Label::builder()
+                .label(&field.label)
+                .halign(gtk4::Align::Start)
+                .css_classes(["caption", "dim-label"])
+                .build());
+            let val_lbl = if field.kind.is_secret() {
+                Label::builder().label("••••••••").halign(gtk4::Align::Start).build()
+            } else {
+                Label::builder().label(&field.value).halign(gtk4::Align::Start).build()
+            };
+            text_box.append(&val_lbl);
+            row_box.append(&text_box);
+
+            // Bouton copier
+            let val_copy = field.value.clone();
+            let copy_btn = Button::from_icon_name("edit-copy-symbolic");
+            copy_btn.add_css_class("flat");
+            copy_btn.set_tooltip_text(Some("Copier"));
+            copy_btn.connect_clicked(move |b| {
+                b.display().clipboard().set_text(&val_copy);
+            });
+            row_box.append(&copy_btn);
+
+            // Bouton supprimer
+            let fields_del = fields2.clone();
+            let del_btn    = Button::from_icon_name("user-trash-symbolic");
+            del_btn.add_css_class("flat");
+            del_btn.add_css_class("destructive-action");
+            del_btn.set_tooltip_text(Some("Supprimer ce champ"));
+            del_btn.connect_clicked(move |_| {
+                fields_del.borrow_mut().remove(idx);
+                // redraw sera re-appelé via connect dans add_field_btn
+                // On force un refresh en supprimant le widget parent
+            });
+            row_box.append(&del_btn);
+
+            let lbr = gtk4::ListBoxRow::new();
+            lbr.set_child(Some(&row_box));
+            lbr.set_activatable(false);
+            list_rc2.append(&lbr);
+        }
+        if fields2.borrow().is_empty() {
+            let empty = gtk4::ListBoxRow::new();
+            empty.set_child(Some(&Label::builder()
+                .label("Aucun champ — cliquez + pour en ajouter")
+                .css_classes(["dim-label", "caption"])
+                .margin_top(12).margin_bottom(12)
+                .build()));
+            empty.set_activatable(false);
+            list_rc2.append(&empty);
+        }
+    });
+
+    redraw();
+
+    // Dialog ajout de champ
+    let fields_add = fields.clone();
+    let redraw_add = redraw.clone();
+    let cf_list_parent = vbox.clone();
+    add_field_btn.connect_clicked(move |btn| {
+        let parent_widget = btn.root()
+            .and_then(|r| r.downcast::<gtk4::Window>().ok());
+
+        let add_dialog  = AdwDialog::builder().title("Nouveau champ").content_width(360).build();
+        let add_toolbar = ToolbarView::new();
+        add_toolbar.add_top_bar(&libadwaita::HeaderBar::new());
+
+        let inner = GtkBox::new(Orientation::Vertical, 12);
+        inner.set_margin_top(16); inner.set_margin_bottom(16);
+        inner.set_margin_start(16); inner.set_margin_end(16);
+
+        // Sélecteur de type
+        let kind_list = gtk4::ListBox::new();
+        kind_list.add_css_class("boxed-list");
+        let selected_kind: Rc<std::cell::Cell<usize>> = Rc::new(std::cell::Cell::new(0));
+        for (i, k) in FieldKind::all().iter().enumerate() {
+            let rw  = gtk4::ListBoxRow::new();
+            let rb  = GtkBox::new(Orientation::Horizontal, 8);
+            rb.set_margin_top(8); rb.set_margin_bottom(8);
+            rb.set_margin_start(12); rb.set_margin_end(12);
+            rb.append(&gtk4::Image::from_icon_name(k.icon()));
+            rb.append(&Label::builder().label(k.label()).hexpand(true)
+                .halign(gtk4::Align::Start).build());
+            if i == 0 {
+                rb.append(&Label::builder().label("✓").css_classes(["accent"]).build());
+            }
+            rw.set_child(Some(&rb));
+            kind_list.append(&rw);
+        }
+        let sk = selected_kind.clone();
+        kind_list.connect_row_activated(move |list, row| {
+            sk.set(row.index() as usize);
+            // Retirer les coches précédentes
+            let mut i = 0i32;
+            while let Some(r) = list.row_at_index(i) {
+                if let Some(child) = r.child() {
+                    if let Some(b) = child.downcast_ref::<GtkBox>() {
+                        // Supprimer la coche si présente
+                        let mut w = b.last_child();
+                        while let Some(widget) = w {
+                            let prev = widget.prev_sibling();
+                            if widget.downcast_ref::<Label>()
+                                .map(|l| l.text() == "✓").unwrap_or(false)
+                            {
+                                b.remove(&widget);
+                            }
+                            w = prev;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            // Ajouter coche sur la ligne sélectionnée
+            if let Some(sel) = list.row_at_index(row.index()) {
+                if let Some(child) = sel.child() {
+                    if let Some(b) = child.downcast_ref::<GtkBox>() {
+                        b.append(&Label::builder().label("✓").css_classes(["accent"]).build());
+                    }
+                }
+            }
+        });
+        inner.append(&kind_list);
+
+        let f_label = EntryRow::builder().title("Nom du champ (ex: PIN, Numéro)").build();
+        let f_value = EntryRow::builder().title("Valeur").build();
+        let lbx = gtk4::ListBox::new();
+        lbx.add_css_class("boxed-list");
+        lbx.append(&f_label);
+        lbx.append(&f_value);
+        inner.append(&lbx);
+
+        let btn_row2   = GtkBox::new(Orientation::Horizontal, 8);
+        btn_row2.set_homogeneous(true);
+        btn_row2.set_margin_top(8);
+        let cancel2 = Button::with_label("Annuler");
+        let ok2     = Button::with_label("Ajouter");
+        ok2.add_css_class("suggested-action");
+        btn_row2.append(&cancel2);
+        btn_row2.append(&ok2);
+        inner.append(&btn_row2);
+
+        add_toolbar.set_content(Some(&inner));
+        add_dialog.set_child(Some(&add_toolbar));
+
+        if let Some(pw) = &parent_widget {
+            add_dialog.present(Some(pw));
+        } else {
+            add_dialog.present(None::<&gtk4::Widget>);
+        }
+
+        let dlg_c2 = add_dialog.clone();
+        cancel2.connect_clicked(move |_| { dlg_c2.close(); });
+
+        let dlg_ok    = add_dialog.clone();
+        let fa2       = fields_add.clone();
+        let rd2       = redraw_add.clone();
+        let sk2       = selected_kind.clone();
+        ok2.connect_clicked(move |_| {
+            let label = f_label.text().to_string();
+            let value = f_value.text().to_string();
+            if label.is_empty() { return; }
+            let kind = FieldKind::all()[sk2.get()].clone();
+            fa2.borrow_mut().push(CustomField::new(kind, label, value));
+            rd2();
+            dlg_ok.close();
+        });
+
+        let _ = cf_list_parent.is_visible(); // borrow pour éviter unused
+    });
+}
+
 // ── Formulaire partagé add / edit ───────────────────────────────────────────
 struct EntryForm {
-    f_title: EntryRow,
-    f_user:  EntryRow,
-    f_pass:  PasswordEntryRow,
-    f_url:   EntryRow,
-    f_cat:   EntryRow,
-    f_notes: EntryRow,
+    f_title:      EntryRow,
+    f_user:       EntryRow,
+    f_pass:       PasswordEntryRow,
+    f_url:        EntryRow,
+    f_cat:        EntryRow,
+    f_notes:      EntryRow,
     strength_lbl: Label,
     gen_btn:      Button,
     fields_box:   gtk4::ListBox,
+    cf_store:     Rc<std::cell::RefCell<Vec<CustomField>>>,
 }
 
 impl EntryForm {
@@ -126,14 +357,14 @@ impl EntryForm {
         password_val: &str,
         url_val:      &str,
         cat_val:      &str,
-        notes_val:    &str,
+        secrets:      &EntrySecrets,
     ) -> Self {
         let f_title = EntryRow::builder().title("Titre *").text(title_val).build();
         let f_user  = EntryRow::builder().title("Identifiant / Email").text(username_val).build();
         let f_pass  = PasswordEntryRow::builder().title("Mot de passe *").text(password_val).build();
         let f_url   = EntryRow::builder().title("URL (optionnel)").text(url_val).build();
         let f_cat   = EntryRow::builder().title("Catégorie : Pro / Perso / Finance").text(cat_val).build();
-        let f_notes = EntryRow::builder().title("Notes (optionnel)").text(notes_val).build();
+        let f_notes = EntryRow::builder().title("Notes (optionnel)").text(&secrets.notes).build();
 
         let init_strength = if password_val.is_empty() {
             "Force : —".to_string()
@@ -163,19 +394,24 @@ impl EntryForm {
         fields_box.append(&f_cat);
         fields_box.append(&f_notes);
 
-        Self { f_title, f_user, f_pass, f_url, f_cat, f_notes, strength_lbl, gen_btn, fields_box }
+        let cf_store = Rc::new(std::cell::RefCell::new(secrets.fields.clone()));
+
+        Self { f_title, f_user, f_pass, f_url, f_cat, f_notes,
+               strength_lbl, gen_btn, fields_box, cf_store }
     }
 
     fn append_to(&self, vbox: &GtkBox) {
         vbox.append(&self.fields_box);
         vbox.append(&self.strength_lbl);
         vbox.append(&self.gen_btn);
+        build_custom_fields_section(vbox, self.cf_store.clone(), "");
     }
 
     fn read(&self) -> Option<EntryFormData> {
         EntryFormData::read(
             &self.f_title, &self.f_user, &self.f_pass,
             &self.f_url, &self.f_cat, &self.f_notes,
+            &self.cf_store,
         )
     }
 }
@@ -186,7 +422,7 @@ pub fn show_add_dialog(
     ctx:    VaultContext,
 ) {
     let (dialog, toolbar) = make_toolbar_dialog("Nouvelle entrée", 440);
-    let form = EntryForm::new("", "", "", "", "", "");
+    let form = EntryForm::new("", "", "", "", "", &EntrySecrets::default());
 
     let vbox = GtkBox::new(Orientation::Vertical, 12);
     vbox.set_margin_top(16);   vbox.set_margin_bottom(16);
@@ -246,16 +482,23 @@ pub fn show_edit_dialog(
     let current_pw = cipher::decrypt(&**ctx.key, &entry.password_encrypted)
         .map(|b| String::from_utf8_lossy(&b).to_string())
         .unwrap_or_default();
-    let current_notes = entry.notes_encrypted.as_ref()
+    let current_secrets: EntrySecrets = entry.notes_encrypted.as_ref()
         .and_then(|enc| cipher::decrypt(&**ctx.key, enc).ok())
-        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .and_then(|b| EntrySecrets::from_json(&b).ok())
+        // Compatibilité anciens enregistrements (notes en texte brut)
+        .or_else(|| entry.notes_encrypted.as_ref()
+            .and_then(|enc| cipher::decrypt(&**ctx.key, enc).ok())
+            .map(|b| EntrySecrets {
+                notes: String::from_utf8_lossy(&b).to_string(),
+                fields: Vec::new(),
+            }))
         .unwrap_or_default();
 
-    let (dialog, toolbar) = make_toolbar_dialog("Modifier l'entrée", 440);
+    let (dialog, toolbar) = make_toolbar_dialog("Modifier l'entrée", 460);
     let form = EntryForm::new(
         &entry.title, &entry.username, &current_pw,
         entry.url.as_deref().unwrap_or(""),
-        &entry.category, &current_notes,
+        &entry.category, &current_secrets,
     );
 
     let vbox = GtkBox::new(Orientation::Vertical, 12);
@@ -623,6 +866,92 @@ pub fn show_settings_dialog(
         }
     });
     vbox.append(&lock_list);
+
+    vbox.append(&Separator::new(Orientation::Horizontal));
+
+    vbox.append(&Separator::new(Orientation::Horizontal));
+
+    // ── Import ──
+    vbox.append(&Label::builder()
+        .label("📥 Import")
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build());
+
+    let import_list = make_fields_box();
+    let import_bw_row = gtk4::ListBoxRow::new();
+    let import_bw_box = GtkBox::new(Orientation::Horizontal, 8);
+    import_bw_box.set_margin_top(10); import_bw_box.set_margin_bottom(10);
+    import_bw_box.set_margin_start(12); import_bw_box.set_margin_end(12);
+    import_bw_box.append(&Label::builder().label("Bitwarden JSON")
+        .hexpand(true).halign(gtk4::Align::Start).build());
+    import_bw_box.append(&gtk4::Image::from_icon_name("go-next-symbolic"));
+    import_bw_row.set_child(Some(&import_bw_box));
+    import_list.append(&import_bw_row);
+
+    let import_csv_row = gtk4::ListBoxRow::new();
+    let import_csv_box = GtkBox::new(Orientation::Horizontal, 8);
+    import_csv_box.set_margin_top(10); import_csv_box.set_margin_bottom(10);
+    import_csv_box.set_margin_start(12); import_csv_box.set_margin_end(12);
+    import_csv_box.append(&Label::builder().label("CSV générique")
+        .hexpand(true).halign(gtk4::Align::Start).build());
+    import_csv_box.append(&gtk4::Image::from_icon_name("go-next-symbolic"));
+    import_csv_row.set_child(Some(&import_csv_box));
+    import_list.append(&import_csv_row);
+    vbox.append(&import_list);
+
+    let store_imp = store.clone();
+    let key_imp   = key.clone();
+    let win_imp   = window.clone();
+    import_list.connect_row_activated(move |_, row| {
+        let is_bw  = row.index() == 0;
+        let filter = gtk4::FileFilter::new();
+        if is_bw {
+            filter.set_name(Some("Bitwarden JSON"));
+            filter.add_pattern("*.json");
+        } else {
+            filter.set_name(Some("CSV"));
+            filter.add_pattern("*.csv");
+        }
+        let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+        filters.append(&filter);
+
+        let dialog = gtk4::FileDialog::builder()
+            .title(if is_bw { "Importer Bitwarden JSON" } else { "Importer CSV" })
+            .filters(&filters)
+            .build();
+
+        let store2 = store_imp.clone();
+        let key2   = key_imp.clone();
+        let win2   = win_imp.clone();
+        dialog.open(Some(win2.upcast_ref::<gtk4::Window>()), None::<&gtk4::gio::Cancellable>,
+            move |result| {
+                let Ok(file) = result else { return; };
+                let Some(path) = file.path() else { return; };
+                let entries_res = if is_bw {
+                    importer::from_bitwarden_json(&path, &key2)
+                        .map_err(|e| e.to_string())
+                } else {
+                    importer::from_csv(&path, &key2)
+                        .map_err(|e| e.to_string())
+                };
+                match entries_res {
+                    Ok(entries) => {
+                        let count = entries.len();
+                        for e in entries {
+                            let _ = store2.insert_entry(&e);
+                        }
+                        gtk4::glib::g_message!(
+                            "vaultpass", "{} entrée(s) importée(s)", count
+                        );
+                    }
+                    Err(e) => {
+                        gtk4::glib::g_critical!("vaultpass", "Import échoué: {}", e);
+                    }
+                }
+            }
+        );
+    });
 
     vbox.append(&Separator::new(Orientation::Horizontal));
 
