@@ -51,7 +51,7 @@ fn main() {
 fn build_ui(app: &Application) {
     let window = Rc::new(ApplicationWindow::builder()
         .application(app)
-        .title("VaultPass Native")
+        .title("VaultPass")
         .default_width(480)
         .default_height(560)
         .build());
@@ -271,7 +271,7 @@ fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     let login_toolbar = ToolbarView::new();
     let login_header  = HeaderBar::new();
     login_header.set_title_widget(Some(
-        &Label::builder().label("VaultPass Native").css_classes(["heading"]).build()
+        &Label::builder().label("VaultPass").css_classes(["heading"]).build()
     ));
     login_toolbar.add_top_bar(&login_header);
 
@@ -285,7 +285,7 @@ fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
 
     let status = StatusPage::new();
     status.set_icon_name(Some("dialog-password-symbolic"));
-    status.set_title("VaultPass Native");
+    status.set_title("VaultPass");
     status.set_description(Some("Entrez votre mot de passe maître pour déverrouiller votre coffre"));
     login_box.append(&status);
 
