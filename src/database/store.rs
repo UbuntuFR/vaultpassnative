@@ -15,11 +15,11 @@ pub enum StoreError {
     Cipher(#[from] CipherError),
     #[error("Erreur KDF : {0}")]
     Kdf(String),
-    #[error("Entr\u00e9e introuvable : {0}")]
+    #[error("Entrée introuvable : {0}")]
     NotFound(String),
     #[error("Erreur I/O : {0}")]
     Io(#[from] std::io::Error),
-    #[error("Base de donn\u00e9es verrouill\u00e9e par une autre instance de VaultPass")]
+    #[error("Base de données verrouillée par une autre instance de VaultPass")]
     AlreadyLocked,
 }
 
@@ -67,7 +67,7 @@ impl VaultStore {
                 username           TEXT    NOT NULL,
                 password_encrypted BLOB    NOT NULL,
                 url                TEXT,
-                category           TEXT    NOT NULL DEFAULT 'G\u00e9n\u00e9ral',
+                category           TEXT    NOT NULL DEFAULT 'Général',
                 notes_encrypted    BLOB,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
@@ -115,7 +115,7 @@ impl VaultStore {
                 .optional()?.flatten()
         };
         match existing {
-            None | Some(ref b) if b.as_ref().map_or(true, |v: &Vec<u8>| v.is_empty()) => {
+            None => {
                 let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
                 Ok(true)

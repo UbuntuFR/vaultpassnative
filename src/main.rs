@@ -1,5 +1,4 @@
 use gtk4::glib;
-use gdk4::prelude::DisplayExt;
 mod crypto;
 mod database;
 mod ui;
@@ -109,7 +108,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     // Copier — avec auto-clear 30s
     let copy_btn = Button::from_icon_name("edit-copy-symbolic");
     copy_btn.add_css_class("flat");
-    copy_btn.set_tooltip_text(Some("Copier le mot de passe (effac\u00e9 en 30s)"));
+    copy_btn.set_tooltip_text(Some("Copier le mot de passe (effacé en 30s)"));
     let enc   = entry.password_encrypted.clone();
     let kc    = Rc::clone(&ctx.key);
     let title = entry.title.clone();
@@ -121,13 +120,13 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
                 ui::clipboard::copy_with_autoclean(&b.display(), &text);
                 to1.add_toast(
                     Toast::builder()
-                        .title("\u2705 Copi\u00e9 \u2014 effac\u00e9 dans 30s")
+                        .title("✅ Copié — effacé dans 30s")
                         .timeout(4)
                         .build()
                 );
-                glib::g_debug!(APP_ID, "Copi\u00e9 : {}", title);
+                glib::g_debug!(APP_ID, "Copié : {}", title);
             }
-            Err(e) => glib::g_warning!(APP_ID, "D\u00e9chiffrement \u00e9chou\u00e9 : {}", e),
+            Err(e) => glib::g_warning!(APP_ID, "Déchiffrement échoué : {}", e),
         }
     });
     row_box.append(&copy_btn);
@@ -169,7 +168,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
                     ctx2.db_entries.borrow_mut().retain(|e| e.id != eid2);
                     ctx2.refresh_banner();
                     ctx2.refresh_empty_state();
-                    ctx2.toast.add_toast(Toast::new("\u{1F5D1}\u{FE0F} Entr\u00e9e supprim\u00e9e"));
+                    ctx2.toast.add_toast(Toast::new("\u{1F5D1}\u{FE0F} Entrée supprimée"));
                 }
             },
         );
@@ -195,7 +194,7 @@ fn build_vault(
 
     let add_btn = Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class("flat");
-    add_btn.set_tooltip_text(Some("Nouvelle entr\u00e9e"));
+    add_btn.set_tooltip_text(Some("Nouvelle entrée"));
     sidebar_header.pack_end(&add_btn);
 
     let lock_btn = Button::from_icon_name("system-lock-screen-symbolic");
@@ -222,7 +221,7 @@ fn build_vault(
     settings_list.add_css_class("navigation-sidebar");
     let sr = ListBoxRow::new();
     sr.set_child(Some(&Label::builder()
-        .label("\u2699\uFE0F  Param\u00e8tres")
+        .label("⚙️  Paramètres")
         .halign(gtk4::Align::Start)
         .margin_start(12).margin_top(8).margin_bottom(8).build()));
     settings_list.append(&sr);
@@ -243,24 +242,24 @@ fn build_vault(
     let content_header = HeaderBar::new();
 
     let search = SearchEntry::new();
-    search.set_placeholder_text(Some("Rechercher\u2026"));
+    search.set_placeholder_text(Some("Rechercher…"));
     search.set_hexpand(true);
     search.set_max_width_chars(40);
     content_header.set_title_widget(Some(&search));
 
     let gen_btn  = Button::from_icon_name("preferences-system-symbolic");
     gen_btn.add_css_class("flat");
-    gen_btn.set_tooltip_text(Some("G\u00e9n\u00e9rateur"));
+    gen_btn.set_tooltip_text(Some("Générateur"));
     content_header.pack_end(&gen_btn);
 
     let sort_btn = Button::from_icon_name("view-sort-ascending-symbolic");
     sort_btn.add_css_class("flat");
-    sort_btn.set_tooltip_text(Some("Trier A\u2192Z / Z\u2192A"));
+    sort_btn.set_tooltip_text(Some("Trier A→Z / Z→A"));
     content_header.pack_end(&sort_btn);
     content_box.append(&content_header);
 
     let count  = db_entries.borrow().len();
-    let banner = Banner::new(&format!("\u{1F510} {} entr\u00e9e{}", count, if count != 1 { "s" } else { "" }));
+    let banner = Banner::new(&format!("\u{1F510} {} entrée{}", count, if count != 1 { "s" } else { "" }));
     banner.set_revealed(true);
     content_box.append(&banner);
 
@@ -281,7 +280,7 @@ fn build_vault(
 
     let empty_page = StatusPage::new();
     empty_page.set_icon_name(Some("dialog-password-symbolic"));
-    empty_page.set_title("Aucune entr\u00e9e");
+    empty_page.set_title("Aucune entrée");
     empty_page.set_description(Some("Cliquez sur + pour ajouter votre premier mot de passe"));
     empty_page.set_vexpand(true);
 
@@ -395,8 +394,8 @@ fn build_vault(
     });
 
     let split_view = NavigationSplitView::new();
-    split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Cat\u00e9gories")));
-    split_view.set_content(Some(&NavigationPage::new(&content_box, "Entr\u00e9es")));
+    split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Catégories")));
+    split_view.set_content(Some(&NavigationPage::new(&content_box, "Entrées")));
     split_view.set_min_sidebar_width(200.0);
     split_view.set_max_sidebar_width(280.0);
     split_view.set_vexpand(true);
@@ -425,11 +424,11 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     let status = StatusPage::new();
     status.set_icon_name(Some("dialog-password-symbolic"));
     status.set_title("VaultPass");
-    status.set_description(Some("Entrez votre mot de passe ma\u00eetre pour d\u00e9verrouiller votre coffre"));
+    status.set_description(Some("Entrez votre mot de passe maître pour déverrouiller votre coffre"));
     login_box.append(&status);
 
     let pw_entry = PasswordEntry::new();
-    pw_entry.set_placeholder_text(Some("Mot de passe ma\u00eetre\u2026"));
+    pw_entry.set_placeholder_text(Some("Mot de passe maître…"));
     pw_entry.set_show_peek_icon(true);
     pw_entry.set_width_chars(30);
     login_box.append(&pw_entry);
@@ -439,14 +438,14 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     error_lbl.set_visible(false);
     login_box.append(&error_lbl);
 
-    let unlock_btn = Button::with_label("\u{1F513} D\u00e9verrouiller");
+    let unlock_btn = Button::with_label("\u{1F513} Déverrouiller");
     unlock_btn.add_css_class("suggested-action");
     unlock_btn.add_css_class("pill");
     unlock_btn.set_halign(gtk4::Align::Center);
     login_box.append(&unlock_btn);
 
     let hint = Label::new(Some(
-        "\u{1F4A1} Premier lancement : tapez votre mot de passe ma\u00eetre pour cr\u00e9er un nouveau coffre."
+        "\u{1F4A1} Premier lancement : tapez votre mot de passe maître pour créer un nouveau coffre."
     ));
     hint.add_css_class("caption");
     hint.add_css_class("dim-label");
@@ -462,7 +461,7 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     let do_unlock = Rc::new(move || {
         let password = pw.text().to_string();
         if password.is_empty() {
-            err.set_text("\u26a0\ufe0f Mot de passe vide.");
+            err.set_text("⚠️ Mot de passe vide.");
             err.set_visible(true);
             return;
         }
@@ -472,12 +471,12 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
         let store = match VaultStore::open(path.to_str().unwrap_or("/tmp/vault.db")) {
             Ok(s)  => Rc::new(s),
             Err(StoreError::AlreadyLocked) => {
-                err.set_text("\u274c VaultPass est d\u00e9j\u00e0 ouvert dans une autre fen\u00eatre.");
+                err.set_text("❌ VaultPass est déjà ouvert dans une autre fenêtre.");
                 err.set_visible(true);
                 return;
             }
             Err(e) => {
-                err.set_text(&format!("\u274c Base : {e}"));
+                err.set_text(&format!("❌ Base : {e}"));
                 err.set_visible(true);
                 return;
             }
@@ -488,28 +487,28 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
             Ok(None) => {
                 let s = kdf::generate_salt();
                 if let Err(e) = store.save_salt(&s) {
-                    err.set_text(&format!("\u274c Sel : {e}")); err.set_visible(true); return;
+                    err.set_text(&format!("❌ Sel : {e}")); err.set_visible(true); return;
                 }
                 s.to_vec()
             }
-            Err(e) => { err.set_text(&format!("\u274c Sel : {e}")); err.set_visible(true); return; }
+            Err(e) => { err.set_text(&format!("❌ Sel : {e}")); err.set_visible(true); return; }
         };
 
         let salt_arr: [u8; 32] = match salt_vec.try_into() {
             Ok(a)  => a,
-            Err(_) => { err.set_text("\u274c Sel corrompu."); err.set_visible(true); return; }
+            Err(_) => { err.set_text("❌ Sel corrompu."); err.set_visible(true); return; }
         };
 
         let master = match kdf::derive_master_key(password.as_bytes(), &salt_arr) {
             Ok(k)  => k,
-            Err(e) => { err.set_text(&format!("\u274c KDF : {e}")); err.set_visible(true); return; }
+            Err(e) => { err.set_text(&format!("❌ KDF : {e}")); err.set_visible(true); return; }
         };
         let key: Rc<Zeroizing<[u8; 32]>> = Rc::new(master.0);
 
         match store.verify_or_init_sentinel(&key) {
             Ok(true)  => {}
-            Ok(false) => { err.set_text("\u274c Mot de passe incorrect."); err.set_visible(true); return; }
-            Err(e)    => { err.set_text(&format!("\u274c V\u00e9rif : {e}")); err.set_visible(true); return; }
+            Ok(false) => { err.set_text("❌ Mot de passe incorrect."); err.set_visible(true); return; }
+            Err(e)    => { err.set_text(&format!("❌ Vérif : {e}")); err.set_visible(true); return; }
         }
 
         let vault = build_vault(store, key, win.clone());
@@ -555,7 +554,7 @@ fn setup_autolock(
             w.set_content(Some(&build_login_screen(w.clone())));
             w.set_default_size(480, 560);
             w.set_size_request(0, 0);
-            glib::g_debug!(APP_ID, "Auto-verrouillage d\u00e9clench\u00e9");
+            glib::g_debug!(APP_ID, "Auto-verrouillage déclenché");
         }
     });
     al
