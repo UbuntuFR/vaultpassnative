@@ -19,7 +19,6 @@ pub struct VaultStore {
 }
 
 impl VaultStore {
-    /// Ouvre (ou crée) la base de données au chemin donné.
     pub fn open(path: &str) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -29,6 +28,7 @@ impl VaultStore {
     }
 
     fn migrate(&self) -> Result<(), StoreError> {
+        // Création des tables si elles n'existent pas
         self.conn.execute_batch("
             CREATE TABLE IF NOT EXISTS vault_meta (
                 id               INTEGER PRIMARY KEY,
@@ -52,6 +52,23 @@ impl VaultStore {
             CREATE INDEX IF NOT EXISTS idx_entries_updated
                 ON entries(updated_at DESC);
         ")?;
+
+        // Migration : ajoute la colonne sentinel si elle est absente
+        // (base créée avant la correction de sécurité)
+        let sentinel_exists: bool = self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('vault_meta') WHERE name = 'sentinel'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0) > 0;
+
+        if !sentinel_exists {
+            self.conn.execute_batch(
+                "ALTER TABLE vault_meta ADD COLUMN sentinel BLOB;"
+            )?;
+        }
+
         Ok(())
     }
 
@@ -79,7 +96,6 @@ impl VaultStore {
         &self,
         key: &Zeroizing<[u8; 32]>,
     ) -> Result<bool, StoreError> {
-        // Lecture de la sentinelle existante
         let existing: Option<Vec<u8>> = {
             let mut stmt = self.conn
                 .prepare("SELECT sentinel FROM vault_meta WHERE id = 1")?;
@@ -89,7 +105,6 @@ impl VaultStore {
         };
 
         match existing {
-            // Pas encore de sentinelle ou blob vide : premier lancement
             None => {
                 let encrypted = encrypt(&**key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute(
