@@ -561,37 +561,20 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
 }
 
 fn setup_autolock(
-    window:  &gtk4::Window,
-    adw_win: Rc<ApplicationWindow>,
+    win:   &gtk4::Window,
+    window: Rc<libadwaita::ApplicationWindow>,
 ) -> Rc<ui::autolock::AutoLock> {
-    let al = Rc::new(ui::autolock::AutoLock::new(ui::autolock::LockDelay::FiveMin));
+    let delay_secs = ui::prefs::Prefs::load().lock_delay_secs;
+    let al = Rc::new(ui::autolock::AutoLock::new(delay_secs));
 
-    let motion = gtk4::EventControllerMotion::new();
-    let al_m   = al.clone();
-    motion.connect_motion(move |_, _, _| al_m.reset());
-    window.add_controller(motion);
+    // Réinitialiser sur toute activité clavier/souris
+    al.bind_widget(win);
 
-    let key_ctrl = gtk4::EventControllerKey::new();
-    let al_k     = al.clone();
-    key_ctrl.connect_key_pressed(move |_, _, _, _| {
-        al_k.reset();
-        glib::Propagation::Proceed
+    let al2 = al.clone();
+    al2.start(move || {
+        let w = window.clone();
+        w.set_content(Some(&build_login_screen(w.clone())));
     });
-    window.add_controller(key_ctrl);
 
-    let w = adw_win.clone();
-    al.start(move || {
-        if w.content().map_or(false, |c|
-            c.is::<ToolbarView>() &&
-            c.downcast_ref::<ToolbarView>()
-             .and_then(|tv| tv.content())
-             .map_or(false, |inner| inner.is::<NavigationSplitView>()))
-        {
-            w.set_content(Some(&build_login_screen(w.clone())));
-            w.set_default_size(480, 560);
-            w.set_size_request(0, 0);
-            glib::g_debug!(APP_ID, "Auto-verrouillage déclenché");
-        }
-    });
     al
 }
