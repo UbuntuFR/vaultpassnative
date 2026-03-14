@@ -4,7 +4,6 @@ runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-  - org.freedesktop.Sdk.Extension.node20
 
 command: vaultpass-native
 
@@ -33,10 +32,9 @@ finish-args:
   - --lock-file=/run/user/1000/vaultpass.lock
 
 build-options:
-  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
+  append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/vaultpass-native/cargo
-    npm_config_nodedir: /usr/lib/sdk/node20
 
 modules:
   - name: vaultpass-native
