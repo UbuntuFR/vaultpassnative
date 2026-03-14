@@ -27,7 +27,7 @@ pub enum ImportError {
     UnknownFormat,
 }
 
-// ── Bitwarden ────────────────────────────────────────────────────────────────
+// ── Bitwarden ────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct BwExport {
@@ -161,6 +161,7 @@ pub fn from_bitwarden_json(
             url,
             category,
             notes_encrypted:    notes_enc,
+            is_favorite:        false,
             created_at:         now,
             updated_at:         now,
         });
@@ -169,7 +170,7 @@ pub fn from_bitwarden_json(
     Ok(out)
 }
 
-// ── CSV générique ─────────────────────────────────────────────────────────────
+// ── CSV générique ──────────────────────────────────────────────────────────────────────────
 // Colonnes attendues (insensibles à la casse) :
 //   name/title, username/login/email, password, url/website, notes, category/folder
 
@@ -241,6 +242,7 @@ pub fn from_csv(
             url:                if url_s.is_empty() { None } else { Some(url_s) },
             category,
             notes_encrypted:    notes_enc,
+            is_favorite:        false,
             created_at:         now,
             updated_at:         now,
         });
@@ -249,7 +251,7 @@ pub fn from_csv(
     Ok(out)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────────────────
 
 fn now_ts() -> i64 {
     std::time::SystemTime::now()
