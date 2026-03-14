@@ -7,7 +7,7 @@ use libadwaita::{
 use gtk4::{
     Box as GtkBox, Orientation, Button, Label,
     Adjustment, Scale, Switch, ListBoxRow,
-    Separator,
+    Separator, ScrolledWindow,
 };
 use gdk4::prelude::DisplayExt;
 use std::rc::Rc;
@@ -57,7 +57,7 @@ struct EntryFormData {
     password: String,
     url:      Option<String>,
     category: String,
-    secrets:  EntrySecrets,   // notes + champs custom
+    secrets:  EntrySecrets,
 }
 
 impl EntryFormData {
@@ -120,7 +120,7 @@ impl EntryFormData {
 fn build_custom_fields_section(
     vbox:     &GtkBox,
     fields:   Rc<std::cell::RefCell<Vec<CustomField>>>,
-    key_hint: &str,   // juste pour le titre de section
+    key_hint: &str,
 ) {
     let _ = key_hint;
 
@@ -143,14 +143,11 @@ fn build_custom_fields_section(
     cf_list.add_css_class("boxed-list");
     vbox.append(&cf_list);
 
-    // Rendre la liste accessible dans les closures
     let cf_list_rc = Rc::new(cf_list.clone());
 
-    // Fonction pour redessiner la liste
     let fields2  = fields.clone();
     let list_rc2 = cf_list_rc.clone();
     let redraw = Rc::new(move || {
-        // Vider
         while let Some(child) = list_rc2.first_child() {
             list_rc2.remove(&child);
         }
@@ -159,11 +156,9 @@ fn build_custom_fields_section(
             row_box.set_margin_top(8); row_box.set_margin_bottom(8);
             row_box.set_margin_start(12); row_box.set_margin_end(8);
 
-            // Icône type
             let icon = gtk4::Image::from_icon_name(field.kind.icon());
             row_box.append(&icon);
 
-            // Label + valeur
             let text_box = GtkBox::new(Orientation::Vertical, 2);
             text_box.set_hexpand(true);
             text_box.append(&Label::builder()
@@ -179,7 +174,6 @@ fn build_custom_fields_section(
             text_box.append(&val_lbl);
             row_box.append(&text_box);
 
-            // Bouton copier
             let val_copy = field.value.clone();
             let copy_btn = Button::from_icon_name("edit-copy-symbolic");
             copy_btn.add_css_class("flat");
@@ -189,7 +183,6 @@ fn build_custom_fields_section(
             });
             row_box.append(&copy_btn);
 
-            // Bouton supprimer
             let fields_del = fields2.clone();
             let del_btn    = Button::from_icon_name("user-trash-symbolic");
             del_btn.add_css_class("flat");
@@ -197,8 +190,6 @@ fn build_custom_fields_section(
             del_btn.set_tooltip_text(Some("Supprimer ce champ"));
             del_btn.connect_clicked(move |_| {
                 fields_del.borrow_mut().remove(idx);
-                // redraw sera re-appelé via connect dans add_field_btn
-                // On force un refresh en supprimant le widget parent
             });
             row_box.append(&del_btn);
 
@@ -221,7 +212,6 @@ fn build_custom_fields_section(
 
     redraw();
 
-    // Dialog ajout de champ
     let fields_add = fields.clone();
     let redraw_add = redraw.clone();
     let cf_list_parent = vbox.clone();
@@ -237,7 +227,6 @@ fn build_custom_fields_section(
         inner.set_margin_top(16); inner.set_margin_bottom(16);
         inner.set_margin_start(16); inner.set_margin_end(16);
 
-        // Sélecteur de type
         let kind_list = gtk4::ListBox::new();
         kind_list.add_css_class("boxed-list");
         let selected_kind: Rc<std::cell::Cell<usize>> = Rc::new(std::cell::Cell::new(0));
@@ -258,12 +247,10 @@ fn build_custom_fields_section(
         let sk = selected_kind.clone();
         kind_list.connect_row_activated(move |list, row| {
             sk.set(row.index() as usize);
-            // Retirer les coches précédentes
             let mut i = 0i32;
             while let Some(r) = list.row_at_index(i) {
                 if let Some(child) = r.child() {
                     if let Some(b) = child.downcast_ref::<GtkBox>() {
-                        // Supprimer la coche si présente
                         let mut w = b.last_child();
                         while let Some(widget) = w {
                             let prev = widget.prev_sibling();
@@ -278,7 +265,6 @@ fn build_custom_fields_section(
                 }
                 i += 1;
             }
-            // Ajouter coche sur la ligne sélectionnée
             if let Some(sel) = list.row_at_index(row.index()) {
                 if let Some(child) = sel.child() {
                     if let Some(b) = child.downcast_ref::<GtkBox>() {
@@ -333,7 +319,7 @@ fn build_custom_fields_section(
             dlg_ok.close();
         });
 
-        let _ = cf_list_parent.is_visible(); // borrow pour éviter unused
+        let _ = cf_list_parent.is_visible();
     });
 }
 
@@ -486,7 +472,6 @@ pub fn show_edit_dialog(
     let current_secrets: EntrySecrets = entry.notes_encrypted.as_ref()
         .and_then(|enc| cipher::decrypt(&ctx.key, enc).ok())
         .and_then(|b| EntrySecrets::from_json(&b).ok())
-        // Compatibilité anciens enregistrements (notes en texte brut)
         .or_else(|| entry.notes_encrypted.as_ref()
             .and_then(|enc| cipher::decrypt(&ctx.key, enc).ok())
             .map(|b| EntrySecrets {
@@ -710,6 +695,12 @@ pub fn show_settings_dialog(
 ) {
     let (dialog, toolbar) = make_toolbar_dialog("⚙️ Paramètres", 460);
 
+    // ── ScrolledWindow pour tout le contenu ──
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+
     let vbox = GtkBox::new(Orientation::Vertical, 16);
     vbox.set_margin_top(16);   vbox.set_margin_bottom(16);
     vbox.set_margin_start(16); vbox.set_margin_end(16);
@@ -853,7 +844,8 @@ pub fn show_settings_dialog(
         row.set_margin_top(10); row.set_margin_bottom(10);
         row.set_margin_start(12); row.set_margin_end(12);
         row.append(&Label::builder().label(delay.label()).hexpand(true).halign(gtk4::Align::Start).build());
-        if *delay as u64 == current_delay {
+        // cast correct : isize -> u64 via as
+        if (*delay as isize) as u64 == current_delay {
             row.append(&Label::builder().label("✓").css_classes(["accent"]).build());
         }
         rw.set_child(Some(&row));
@@ -861,18 +853,45 @@ pub fn show_settings_dialog(
     }
     let prefs_lk    = prefs.clone();
     let autolock_lk = autolock.clone();
+    let lock_list_rc = lock_list.clone();
     lock_list.connect_row_activated(move |_, row| {
         let delays = LockDelay::all();
         if let Some(d) = delays.get(row.index() as usize) {
-            let secs = *d as u64;
+            // cast correct pour Never (u64::MAX as isize as u64 == u64::MAX)
+            let secs = (*d as isize) as u64;
             prefs_lk.borrow_mut().lock_delay_secs = secs;
             prefs_lk.borrow().save();
             autolock_lk.set_delay(secs);
+
+            // Mettre à jour le ✓ visuellement
+            let mut i = 0i32;
+            while let Some(r) = lock_list_rc.row_at_index(i) {
+                if let Some(child) = r.child() {
+                    if let Some(b) = child.downcast_ref::<GtkBox>() {
+                        let mut w = b.last_child();
+                        while let Some(widget) = w {
+                            let prev = widget.prev_sibling();
+                            if widget.downcast_ref::<Label>()
+                                .map(|l| l.text() == "✓").unwrap_or(false)
+                            {
+                                b.remove(&widget);
+                            }
+                            w = prev;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            if let Some(sel) = lock_list_rc.row_at_index(row.index()) {
+                if let Some(child) = sel.child() {
+                    if let Some(b) = child.downcast_ref::<GtkBox>() {
+                        b.append(&Label::builder().label("✓").css_classes(["accent"]).build());
+                    }
+                }
+            }
         }
     });
     vbox.append(&lock_list);
-
-    vbox.append(&Separator::new(Orientation::Horizontal));
 
     vbox.append(&Separator::new(Orientation::Horizontal));
 
@@ -991,7 +1010,9 @@ pub fn show_settings_dialog(
     close_btn.set_margin_top(8);
     vbox.append(&close_btn);
 
-    toolbar.set_content(Some(&vbox));
+    // ── Assembler : vbox dans scroll, scroll dans toolbar ──
+    scroll.set_child(Some(&vbox));
+    toolbar.set_content(Some(&scroll));
     dialog.set_child(Some(&toolbar));
     dialog.present(Some(parent));
 
