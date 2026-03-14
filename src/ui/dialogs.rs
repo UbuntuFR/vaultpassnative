@@ -109,6 +109,7 @@ impl EntryFormData {
             url:                self.url.clone(),
             category:           self.category.clone(),
             notes_encrypted:    notes_enc,
+            is_favorite:        false,
             created_at,
             updated_at:         now_unix(),
         })
