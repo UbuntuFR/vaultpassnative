@@ -44,9 +44,8 @@ modules:
     build-commands:
       - cargo build --release --manifest-path Cargo.toml
       - install -Dm755 target/release/vaultpass-native /app/bin/vaultpass-native
-      - install -Dm644 data/com.vaultpass.VaultPass.desktop /app/share/applications/com.vaultpass.VaultPass.desktop
-      - install -Dm644 data/com.vaultpass.VaultPass.metainfo.xml /app/share/metainfo/com.vaultpass.VaultPass.metainfo.xml
-      - install -Dm644 data/icons/hicolor/256x256/apps/com.vaultpass.VaultPass.png /app/share/icons/hicolor/256x256/apps/com.vaultpass.VaultPass.png
+      - install -Dm644 com.vaultpass.VaultPass.desktop /app/share/applications/com.vaultpass.VaultPass.desktop
+      - install -Dm644 com.vaultpass.VaultPass.metainfo.xml /app/share/metainfo/com.vaultpass.VaultPass.metainfo.xml
     sources:
       - type: dir
         path: .
