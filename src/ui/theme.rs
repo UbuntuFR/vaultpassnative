@@ -120,13 +120,17 @@ thread_local! {
 
 fn with_provider<F: FnOnce(&CssProvider)>(f: F) {
     CUSTOM_CSS_PROVIDER.with(|cell| {
+        // FIX #4: Handle missing display gracefully instead of panicking
         let p = cell.get_or_init(|| {
             let p = CssProvider::new();
-            gtk4::style_context_add_provider_for_display(
-                &gdk4::Display::default().expect("display"),
-                &p,
-                gtk4::STYLE_PROVIDER_PRIORITY_USER,
-            );
+            // Only add provider if display is available
+            if let Some(display) = gdk4::Display::default() {
+                gtk4::style_context_add_provider_for_display(
+                    &display,
+                    &p,
+                    gtk4::STYLE_PROVIDER_PRIORITY_USER,
+                );
+            }
             p
         });
         f(p);
