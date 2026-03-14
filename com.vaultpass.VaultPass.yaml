@@ -49,5 +49,3 @@ modules:
     sources:
       - type: dir
         path: .
-      - type: file
-        path: Cargo.lock
