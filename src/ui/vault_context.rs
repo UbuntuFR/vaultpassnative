@@ -1,9 +1,9 @@
-//! Struct contexte partag\u00e9 dans tout le vault.
+//! Struct contexte partagé dans tout le vault.
 use std::cell::RefCell;
 use std::rc::Rc;
 use zeroize::Zeroizing;
 use libadwaita::{Banner, ToastOverlay};
-use libadwaita::prelude::*;
+
 use gtk4::prelude::WidgetExt;
 use crate::database::{store::VaultStore, models::VaultEntry};
 
@@ -34,7 +34,7 @@ impl VaultContext {
     pub fn refresh_banner(&self) {
         let n = self.db_entries.borrow().len();
         self.banner.set_title(&format!(
-            "\u{1F510} {} entr\u00e9e{}", n, if n != 1 { "s" } else { "" }
+            "🔐 {} entrée{}", n, if n != 1 { "s" } else { "" }
         ));
     }
 

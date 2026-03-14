@@ -13,7 +13,7 @@ pub enum StoreError {
     Cipher(#[from] CipherError),
     #[error("Erreur KDF : {0}")]
     Kdf(String),
-    #[error("Entr\u00e9e introuvable : {0}")]
+    #[error("Entrée introuvable : {0}")]
     NotFound(String),
 }
 
@@ -52,7 +52,7 @@ impl VaultStore {
                 username           TEXT    NOT NULL,
                 password_encrypted BLOB    NOT NULL,
                 url                TEXT,
-                category           TEXT    NOT NULL DEFAULT 'G\u00e9n\u00e9ral',
+                category           TEXT    NOT NULL DEFAULT 'Général',
                 notes_encrypted    BLOB,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
@@ -329,10 +329,10 @@ mod tests {
         let store = VaultStore::open_in_memory().unwrap();
         let key   = make_key();
         let mut e = make_entry(&key);
-        e.notes_encrypted = Some(cipher::encrypt(&**key, b"notes secretes").unwrap());
+        e.notes_encrypted = Some(cipher::encrypt(&*key, b"notes secretes").unwrap());
         store.insert_entry(&e).unwrap();
         let list  = store.list_entries().unwrap();
-        let dec   = cipher::decrypt(&**key, list[0].notes_encrypted.as_ref().unwrap()).unwrap();
+        let dec   = cipher::decrypt(&*key, list[0].notes_encrypted.as_ref().unwrap()).unwrap();
         assert_eq!(&*dec, b"notes secretes");
     }
 }
