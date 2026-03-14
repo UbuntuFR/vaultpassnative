@@ -3,6 +3,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 use crate::database::models::VaultEntry;
 use crate::crypto::cipher::{encrypt, decrypt, SENTINEL_PLAINTEXT, CipherError};
+use crate::crypto::kdf;
 
 #[derive(Error, Debug)]
 pub enum StoreError {
@@ -10,6 +11,8 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("Erreur de chiffrement : {0}")]
     Cipher(#[from] CipherError),
+    #[error("Erreur KDF : {0}")]
+    Kdf(String),
     #[error("Entrée introuvable : {0}")]
     NotFound(String),
 }
@@ -28,7 +31,6 @@ impl VaultStore {
     }
 
     fn migrate(&self) -> Result<(), StoreError> {
-        // Création des tables si elles n'existent pas
         self.conn.execute_batch("
             CREATE TABLE IF NOT EXISTS vault_meta (
                 id               INTEGER PRIMARY KEY,
@@ -47,14 +49,10 @@ impl VaultStore {
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_entries_category
-                ON entries(category);
-            CREATE INDEX IF NOT EXISTS idx_entries_updated
-                ON entries(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_entries_category ON entries(category);
+            CREATE INDEX IF NOT EXISTS idx_entries_updated  ON entries(updated_at DESC);
         ")?;
 
-        // Migration : ajoute la colonne sentinel si elle est absente
-        // (base créée avant la correction de sécurité)
         let sentinel_exists: bool = self.conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('vault_meta') WHERE name = 'sentinel'",
@@ -64,11 +62,8 @@ impl VaultStore {
             .unwrap_or(0) > 0;
 
         if !sentinel_exists {
-            self.conn.execute_batch(
-                "ALTER TABLE vault_meta ADD COLUMN sentinel BLOB;"
-            )?;
+            self.conn.execute_batch("ALTER TABLE vault_meta ADD COLUMN sentinel BLOB;")?;
         }
-
         Ok(())
     }
 
@@ -81,17 +76,10 @@ impl VaultStore {
     }
 
     pub fn load_salt(&self) -> Result<Option<Vec<u8>>, StoreError> {
-        let mut stmt = self.conn
-            .prepare("SELECT salt FROM vault_meta WHERE id = 1")?;
-        let result = stmt
-            .query_row([], |row| row.get(0))
-            .optional()?;
-        Ok(result)
+        let mut stmt = self.conn.prepare("SELECT salt FROM vault_meta WHERE id = 1")?;
+        Ok(stmt.query_row([], |row| row.get(0)).optional()?)
     }
 
-    /// Vérifie le mot de passe maître via la sentinelle chiffrée.
-    /// - Coffre vierge (pas de sentinelle) → la crée et retourne Ok(true).
-    /// - Coffre existant → déchiffre et compare. Ok(false) si mot de passe incorrect.
     pub fn verify_or_init_sentinel(
         &self,
         key: &Zeroizing<[u8; 32]>,
@@ -105,15 +93,7 @@ impl VaultStore {
         };
 
         match existing {
-            None => {
-                let encrypted = encrypt(&**key, SENTINEL_PLAINTEXT)?;
-                self.conn.execute(
-                    "UPDATE vault_meta SET sentinel = ?1 WHERE id = 1",
-                    params![encrypted],
-                )?;
-                Ok(true)
-            }
-            Some(ref blob) if blob.is_empty() => {
+            None | Some(ref _empty) if existing.as_ref().map_or(true, |b| b.is_empty()) => {
                 let encrypted = encrypt(&**key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute(
                     "UPDATE vault_meta SET sentinel = ?1 WHERE id = 1",
@@ -137,17 +117,29 @@ impl VaultStore {
               notes_encrypted, created_at, updated_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
-                entry.id,
-                entry.title,
-                entry.username,
-                entry.password_encrypted,
-                entry.url,
-                entry.category,
-                entry.notes_encrypted,
-                entry.created_at,
-                entry.updated_at,
+                entry.id, entry.title, entry.username,
+                entry.password_encrypted, entry.url, entry.category,
+                entry.notes_encrypted, entry.created_at, entry.updated_at,
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn update_entry(&self, entry: &VaultEntry) -> Result<(), StoreError> {
+        let rows = self.conn.execute(
+            "UPDATE entries SET
+                title = ?1, username = ?2, password_encrypted = ?3,
+                url = ?4, category = ?5, notes_encrypted = ?6, updated_at = ?7
+             WHERE id = ?8",
+            params![
+                entry.title, entry.username, entry.password_encrypted,
+                entry.url, entry.category, entry.notes_encrypted,
+                entry.updated_at, entry.id,
+            ],
+        )?;
+        if rows == 0 {
+            return Err(StoreError::NotFound(entry.id.clone()));
+        }
         Ok(())
     }
 
@@ -182,6 +174,49 @@ impl VaultStore {
         if rows == 0 {
             return Err(StoreError::NotFound(id.to_string()));
         }
+        Ok(())
+    }
+
+    /// Re-chiffre toutes les entrées avec un nouveau mot de passe maître.
+    pub fn change_master_password(
+        &self,
+        old_key: &Zeroizing<[u8; 32]>,
+        new_password: &[u8],
+    ) -> Result<(), StoreError> {
+        // Générer nouveau sel + dériver nouvelle clé
+        let new_salt = kdf::generate_salt();
+        let new_master = kdf::derive_master_key(new_password, &new_salt)
+            .map_err(|e| StoreError::Kdf(e.to_string()))?;
+        let new_key = new_master.0;
+
+        // Re-chiffrer toutes les entrées
+        let entries = self.list_entries()?;
+        for entry in &entries {
+            let plain_pw = decrypt(&**old_key, &entry.password_encrypted)
+                .map_err(StoreError::Cipher)?;
+            let new_pw_enc = encrypt(&*new_key, &plain_pw)?;
+
+            let new_notes_enc = match &entry.notes_encrypted {
+                Some(enc) => {
+                    let plain = decrypt(&**old_key, enc).map_err(StoreError::Cipher)?;
+                    Some(encrypt(&*new_key, &plain)?)
+                }
+                None => None,
+            };
+
+            self.conn.execute(
+                "UPDATE entries SET password_encrypted = ?1, notes_encrypted = ?2 WHERE id = ?3",
+                params![new_pw_enc, new_notes_enc, entry.id],
+            )?;
+        }
+
+        // Nouveau sel + nouvelle sentinelle
+        let new_sentinel = encrypt(&*new_key, SENTINEL_PLAINTEXT)?;
+        self.conn.execute(
+            "UPDATE vault_meta SET salt = ?1, sentinel = ?2 WHERE id = 1",
+            params![new_salt.as_ref(), new_sentinel],
+        )?;
+
         Ok(())
     }
 }

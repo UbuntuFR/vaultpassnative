@@ -8,7 +8,7 @@ use libadwaita::prelude::*;
 use libadwaita::{
     Application, ApplicationWindow,
     NavigationSplitView, NavigationPage, Banner,
-    StatusPage, ToolbarView, HeaderBar,
+    StatusPage, ToolbarView, HeaderBar, Toast, ToastOverlay,
 };
 use gtk4::{
     Box as GtkBox, Orientation, Label, SearchEntry,
@@ -67,6 +67,164 @@ fn build_ui(app: &Application) {
     window.present();
 }
 
+// ── Couleur déterministe selon la première lettre ──────────────────
+fn initial_color(title: &str) -> &'static str {
+    let colors = [
+        "#e74c3c", "#e67e22", "#f1c40f", "#2ecc71",
+        "#1abc9c", "#3498db", "#9b59b6", "#e91e63",
+        "#00bcd4", "#ff5722", "#607d8b", "#795548",
+    ];
+    let idx = title.chars().next()
+        .map(|c| (c as usize) % colors.len())
+        .unwrap_or(0);
+    colors[idx]
+}
+
+pub fn build_entry_row(
+    entry:        &DbEntry,
+    key:          &Rc<Zeroizing<[u8; 32]>>,
+    store:        &Rc<VaultStore>,
+    db_entries:   &Rc<RefCell<Vec<DbEntry>>>,
+    entries_list: &ListBox,
+    banner:       &Banner,
+    toast_overlay: &ToastOverlay,
+) -> ListBoxRow {
+    let row     = ListBoxRow::new();
+    let row_box = GtkBox::new(Orientation::Horizontal, 12);
+    row_box.set_margin_top(10);  row_box.set_margin_bottom(10);
+    row_box.set_margin_start(8); row_box.set_margin_end(8);
+
+    // Initiale colorée
+    let initial_char = entry.title.chars().next()
+        .unwrap_or('?').to_uppercase().next().unwrap_or('?');
+    let avatar_lbl = Label::builder()
+        .label(&initial_char.to_string())
+        .width_chars(2)
+        .build();
+    avatar_lbl.set_size_request(32, 32);
+    let color = initial_color(&entry.title);
+    avatar_lbl.set_css_classes(&["heading"]);
+    // Inline CSS via widget name trick avec provider
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_string(&format!(
+        "label {{ background-color: {}; border-radius: 16px; color: white; padding: 4px 8px; font-weight: bold; }}",
+        color
+    ));
+    avatar_lbl.style_context().add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    row_box.append(&avatar_lbl);
+
+    let tc = GtkBox::new(Orientation::Vertical, 2);
+    tc.append(&Label::builder()
+        .label(entry.title.as_str())
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build());
+    tc.append(&Label::builder()
+        .label(entry.username.as_str())
+        .halign(gtk4::Align::Start)
+        .css_classes(["caption", "dim-label"])
+        .build());
+    tc.set_hexpand(true);
+    row_box.append(&tc);
+
+    let cat_lbl = Label::new(Some(&entry.category));
+    cat_lbl.add_css_class("tag");
+    row_box.append(&cat_lbl);
+
+    // Bouton copier mot de passe
+    let copy_btn = Button::from_icon_name("edit-copy-symbolic");
+    copy_btn.add_css_class("flat");
+    copy_btn.set_tooltip_text(Some("Copier le mot de passe"));
+    let enc  = entry.password_encrypted.clone();
+    let kc   = Rc::clone(key);
+    let tc2  = entry.title.clone();
+    let to1  = toast_overlay.clone();
+    copy_btn.connect_clicked(move |b| {
+        match cipher::decrypt(&**kc, &enc) {
+            Ok(plain) => {
+                let pw = String::from_utf8_lossy(&plain).to_string();
+                b.display().clipboard().set_text(&pw);
+                to1.add_toast(Toast::new("✅ Mot de passe copié !"));
+                glib::g_debug!(APP_ID, "Mot de passe copié : {}", tc2);
+            }
+            Err(e) => glib::g_warning!(APP_ID, "Déchiffrement échoué : {}", e),
+        }
+    });
+    row_box.append(&copy_btn);
+
+    // Bouton modifier
+    let edit_btn = Button::from_icon_name("document-edit-symbolic");
+    edit_btn.add_css_class("flat");
+    edit_btn.set_tooltip_text(Some("Modifier"));
+    let entry_clone  = entry.clone();
+    let store_e      = Rc::clone(store);
+    let key_e        = Rc::clone(key);
+    let db_e         = Rc::clone(db_entries);
+    let list_e       = entries_list.clone();
+    let banner_e     = banner.clone();
+    let toast_e      = toast_overlay.clone();
+    let row_e        = row.clone();
+    edit_btn.connect_clicked(move |btn| {
+        ui::dialogs::show_edit_dialog(
+            btn.upcast_ref::<gtk4::Widget>(),
+            entry_clone.clone(),
+            store_e.clone(),
+            key_e.clone(),
+            db_e.clone(),
+            list_e.clone(),
+            banner_e.clone(),
+            toast_e.clone(),
+            row_e.clone(),
+        );
+    });
+    row_box.append(&edit_btn);
+
+    // Bouton supprimer
+    let del_btn = Button::from_icon_name("user-trash-symbolic");
+    del_btn.add_css_class("flat");
+    del_btn.add_css_class("destructive-action");
+    del_btn.set_tooltip_text(Some("Supprimer"));
+
+    let eid    = entry.id.clone();
+    let etitle = entry.title.clone();
+    let sd     = Rc::clone(store);
+    let dd     = Rc::clone(db_entries);
+    let ld     = entries_list.clone();
+    let bd     = banner.clone();
+    let rw     = row.clone();
+    let to2    = toast_overlay.clone();
+
+    del_btn.connect_clicked(move |btn| {
+        let sd2  = sd.clone();
+        let dd2  = dd.clone();
+        let ld2  = ld.clone();
+        let bd2  = bd.clone();
+        let rw2  = rw.clone();
+        let eid2 = eid.clone();
+        let to3  = to2.clone();
+        ui::dialogs::show_delete_confirm(
+            btn.upcast_ref::<gtk4::Widget>(),
+            &etitle,
+            move || {
+                if sd2.delete_entry(&eid2).is_ok() {
+                    ld2.remove(&rw2);
+                    dd2.borrow_mut().retain(|e| e.id != eid2);
+                    let n = dd2.borrow().len();
+                    bd2.set_title(&format!(
+                        "🔐 {} entrée{}",
+                        n, if n != 1 { "s" } else { "" }
+                    ));
+                    to3.add_toast(Toast::new("🗑️ Entrée supprimée"));
+                    glib::g_debug!(APP_ID, "Entrée supprimée");
+                }
+            },
+        );
+    });
+    row_box.append(&del_btn);
+    row.set_child(Some(&row_box));
+    row
+}
+
 fn build_vault(
     store:     Rc<VaultStore>,
     key_bytes: Rc<Zeroizing<[u8; 32]>>,
@@ -76,7 +234,7 @@ fn build_vault(
         store.list_entries().unwrap_or_default()
     ));
 
-    // ── SIDEBAR ──────────────────────────────────────────────────────────
+    // ── SIDEBAR ───────────────────────────────────────────────────────
     let sidebar_box    = GtkBox::new(Orientation::Vertical, 0);
     let sidebar_header = HeaderBar::new();
     sidebar_header.set_show_end_title_buttons(false);
@@ -123,12 +281,19 @@ fn build_vault(
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
-    let ws = window.clone();
+    let store_s = store.clone();
+    let key_s   = key_bytes.clone();
+    let ws      = window.clone();
     settings_list.connect_row_activated(move |_, _| {
-        ui::dialogs::show_settings_dialog(ws.upcast_ref::<gtk4::Widget>());
+        ui::dialogs::show_settings_dialog(
+            ws.upcast_ref::<gtk4::Widget>(),
+            store_s.clone(),
+            key_s.clone(),
+            ws.clone(),
+        );
     });
 
-    // ── CONTENU ──────────────────────────────────────────────────────────
+    // ── CONTENU ───────────────────────────────────────────────────────
     let content_box = GtkBox::new(Orientation::Vertical, 0);
     content_box.set_vexpand(true);
     let content_header = HeaderBar::new();
@@ -143,12 +308,24 @@ fn build_vault(
     gen_btn.add_css_class("flat");
     gen_btn.set_tooltip_text(Some("Générateur"));
     content_header.pack_end(&gen_btn);
+
+    // Bouton tri
+    let sort_btn = Button::from_icon_name("view-sort-ascending-symbolic");
+    sort_btn.add_css_class("flat");
+    sort_btn.set_tooltip_text(Some("Trier A→Z / Z→A"));
+    content_header.pack_end(&sort_btn);
+
     content_box.append(&content_header);
 
     let count  = db_entries.borrow().len();
-    let banner = Banner::new(&format!("🔐 {} entrée{}", count, if count > 1 { "s" } else { "" }));
+    let banner = Banner::new(&format!("🔐 {} entrée{}", count, if count != 1 { "s" } else { "" }));
     banner.set_revealed(true);
     content_box.append(&banner);
+
+    // Toast overlay pour les notifications
+    let toast_overlay = ToastOverlay::new();
+    toast_overlay.set_vexpand(true);
+    toast_overlay.set_hexpand(true);
 
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
@@ -156,24 +333,78 @@ fn build_vault(
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
 
     let entries_list = ListBox::new();
-    entries_list.set_selection_mode(SelectionMode::Single);
+    entries_list.set_selection_mode(SelectionMode::None);
     entries_list.add_css_class("boxed-list");
     entries_list.set_margin_top(12);
     entries_list.set_margin_bottom(12);
     entries_list.set_margin_start(16);
     entries_list.set_margin_end(16);
 
+    // État vide
+    let empty_page = StatusPage::new();
+    empty_page.set_icon_name(Some("dialog-password-symbolic"));
+    empty_page.set_title("Aucune entrée");
+    empty_page.set_description(Some("Cliquez sur + pour ajouter votre premier mot de passe"));
+    empty_page.set_vexpand(true);
+
     for entry in db_entries.borrow().iter() {
         let row = build_entry_row(
-            entry, &key_bytes, &store, &db_entries, &entries_list, &banner,
+            entry, &key_bytes, &store,
+            &db_entries, &entries_list, &banner, &toast_overlay,
         );
         entries_list.append(&row);
     }
 
-    scroll.set_child(Some(&entries_list));
-    content_box.append(&scroll);
+    // Affiche liste ou état vide
+    let inner_box = GtkBox::new(Orientation::Vertical, 0);
+    inner_box.set_vexpand(true);
+    if db_entries.borrow().is_empty() {
+        empty_page.set_visible(true);
+        entries_list.set_visible(false);
+    }
+    inner_box.append(&entries_list);
+    inner_box.append(&empty_page);
+    scroll.set_child(Some(&inner_box));
+    toast_overlay.set_child(Some(&scroll));
+    content_box.append(&toast_overlay);
 
-    // ── Filtre ───────────────────────────────────────────────────────────
+    // ── Tri A↔Z ───────────────────────────────────────────────────────
+    let sort_asc: Rc<RefCell<bool>> = Rc::new(RefCell::new(true));
+    let db_sort   = db_entries.clone();
+    let el_sort   = entries_list.clone();
+    let key_sort  = key_bytes.clone();
+    let store_sort = store.clone();
+    let banner_sort = banner.clone();
+    let toast_sort  = toast_overlay.clone();
+    let ep_sort     = empty_page.clone();
+
+    sort_btn.connect_clicked(move |_| {
+        let mut asc = sort_asc.borrow_mut();
+        *asc = !*asc;
+        let ascending = *asc;
+        drop(asc);
+
+        db_sort.borrow_mut().sort_by(|a, b| {
+            if ascending { a.title.to_lowercase().cmp(&b.title.to_lowercase()) }
+            else         { b.title.to_lowercase().cmp(&a.title.to_lowercase()) }
+        });
+
+        while let Some(child) = el_sort.first_child() {
+            el_sort.remove(&child);
+        }
+        for entry in db_sort.borrow().iter() {
+            let row = build_entry_row(
+                entry, &key_sort, &store_sort,
+                &db_sort, &el_sort, &banner_sort, &toast_sort,
+            );
+            el_sort.append(&row);
+        }
+        let n = db_sort.borrow().len();
+        ep_sort.set_visible(n == 0);
+        el_sort.set_visible(n > 0);
+    });
+
+    // ── Filtre ────────────────────────────────────────────────────────
     let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
@@ -181,11 +412,13 @@ fn build_vault(
     let cat_f  = cat_filter.clone();
     let srch_f = search_filter.clone();
     let db_c   = db_entries.clone();
+    let ep_c   = empty_page.clone();
 
     let apply_filter = Rc::new(move || {
-        let cat   = cat_f.borrow().clone();
-        let q     = srch_f.borrow().to_lowercase();
-        let db    = db_c.borrow();
+        let cat = cat_f.borrow().clone();
+        let q   = srch_f.borrow().to_lowercase();
+        let db  = db_c.borrow();
+        let mut visible_count = 0usize;
         let mut i = 0i32;
         while let Some(row) = el_c.row_at_index(i) {
             let visible = if let Some(entry) = db.get(i as usize) {
@@ -197,8 +430,11 @@ fn build_vault(
                 cat_ok && srch_ok
             } else { true };
             row.set_visible(visible);
+            if visible { visible_count += 1; }
             i += 1;
         }
+        ep_c.set_visible(visible_count == 0);
+        el_c.set_visible(visible_count > 0 || db.len() == 0);
     });
 
     let af1 = apply_filter.clone();
@@ -207,10 +443,10 @@ fn build_vault(
         let txt = sel
             .and_then(|r| r.child().and_downcast_ref::<Label>().map(|l| l.text().to_string()))
             .unwrap_or_default();
-        *cf1.borrow_mut() = if txt.contains("Perso")       { Some("Perso".to_string()) }
-            else if txt.contains("Pro")                     { Some("Pro".to_string()) }
-            else if txt.contains("Finance")                 { Some("Finance".to_string()) }
-            else                                             { None };
+        *cf1.borrow_mut() = if txt.contains("Perso")   { Some("Perso".to_string()) }
+            else if txt.contains("Pro")                  { Some("Pro".to_string()) }
+            else if txt.contains("Finance")              { Some("Finance".to_string()) }
+            else                                          { None };
         af1();
     });
 
@@ -221,7 +457,7 @@ fn build_vault(
         af2();
     });
 
-    // ── Verrouiller ──────────────────────────────────────────────────────
+    // ── Verrouiller ───────────────────────────────────────────────────
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
         let login = build_login_screen(wl.clone());
@@ -231,28 +467,31 @@ fn build_vault(
         glib::g_debug!(APP_ID, "Coffre verrouillé manuellement");
     });
 
-    // ── Générateur ───────────────────────────────────────────────────────
+    // ── Générateur ────────────────────────────────────────────────────
     let wg = window.clone();
     gen_btn.connect_clicked(move |_| {
         ui::dialogs::show_generator_dialog(wg.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── Nouvelle entrée ──────────────────────────────────────────────────
-    let st2  = store.clone();
-    let ka   = key_bytes.clone();
-    let el_a = entries_list.clone();
-    let db_a = db_entries.clone();
-    let bn_a = banner.clone();
-    let wa   = window.clone();
+    // ── Nouvelle entrée ───────────────────────────────────────────────
+    let st2    = store.clone();
+    let ka     = key_bytes.clone();
+    let el_a   = entries_list.clone();
+    let db_a   = db_entries.clone();
+    let bn_a   = banner.clone();
+    let wa     = window.clone();
+    let to_a   = toast_overlay.clone();
+    let ep_a   = empty_page.clone();
     add_btn.connect_clicked(move |_| {
         ui::dialogs::show_add_dialog(
             wa.upcast_ref::<gtk4::Widget>(),
             st2.clone(), ka.clone(),
             el_a.clone(), db_a.clone(), bn_a.clone(),
+            to_a.clone(), ep_a.clone(),
         );
     });
 
-    // ── NavigationSplitView ──────────────────────────────────────────────
+    // ── NavigationSplitView ───────────────────────────────────────────
     let split_view = NavigationSplitView::new();
     split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Catégories")));
     split_view.set_content(Some(&NavigationPage::new(&content_box, "Entrées")));
@@ -402,99 +641,6 @@ fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     pw_entry.connect_activate(move |_| du2());
 
     login_toolbar
-}
-
-pub fn build_entry_row(
-    entry:        &DbEntry,
-    key:          &Rc<Zeroizing<[u8; 32]>>,
-    store:        &Rc<VaultStore>,
-    db_entries:   &Rc<RefCell<Vec<DbEntry>>>,
-    entries_list: &ListBox,
-    banner:       &Banner,
-) -> ListBoxRow {
-    let row     = ListBoxRow::new();
-    let row_box = GtkBox::new(Orientation::Horizontal, 12);
-    row_box.set_margin_top(10);  row_box.set_margin_bottom(10);
-    row_box.set_margin_start(8); row_box.set_margin_end(8);
-
-    row_box.append(&Label::new(Some("🔑")));
-
-    let tc = GtkBox::new(Orientation::Vertical, 2);
-    tc.append(&Label::builder()
-        .label(entry.title.as_str())
-        .halign(gtk4::Align::Start)
-        .css_classes(["heading"])
-        .build());
-    tc.append(&Label::builder()
-        .label(entry.username.as_str())
-        .halign(gtk4::Align::Start)
-        .css_classes(["caption", "dim-label"])
-        .build());
-    tc.set_hexpand(true);
-    row_box.append(&tc);
-
-    let cat_lbl = Label::new(Some(&entry.category));
-    cat_lbl.add_css_class("tag");
-    row_box.append(&cat_lbl);
-
-    let copy_btn = Button::from_icon_name("edit-copy-symbolic");
-    copy_btn.add_css_class("flat");
-    copy_btn.set_tooltip_text(Some("Copier le mot de passe"));
-    let enc = entry.password_encrypted.clone();
-    let kc  = Rc::clone(key);
-    let tc2 = entry.title.clone();
-    copy_btn.connect_clicked(move |b| {
-        match cipher::decrypt(&**kc, &enc) {
-            Ok(plain) => {
-                let pw = String::from_utf8_lossy(&plain).to_string();
-                b.display().clipboard().set_text(&pw);
-                glib::g_debug!(APP_ID, "Mot de passe copié : {}", tc2);
-            }
-            Err(e) => glib::g_warning!(APP_ID, "Déchiffrement échoué : {}", e),
-        }
-    });
-    row_box.append(&copy_btn);
-
-    let del_btn = Button::from_icon_name("user-trash-symbolic");
-    del_btn.add_css_class("flat");
-    del_btn.add_css_class("destructive-action");
-    del_btn.set_tooltip_text(Some("Supprimer"));
-
-    let eid    = entry.id.clone();
-    let etitle = entry.title.clone();
-    let sd     = Rc::clone(store);
-    let dd     = Rc::clone(db_entries);
-    let ld     = entries_list.clone();
-    let bd     = banner.clone();
-    let rw     = row.clone();
-
-    del_btn.connect_clicked(move |btn| {
-        let sd2  = sd.clone();
-        let dd2  = dd.clone();
-        let ld2  = ld.clone();
-        let bd2  = bd.clone();
-        let rw2  = rw.clone();
-        let eid2 = eid.clone();
-        ui::dialogs::show_delete_confirm(
-            btn.upcast_ref::<gtk4::Widget>(),
-            &etitle,
-            move || {
-                if sd2.delete_entry(&eid2).is_ok() {
-                    ld2.remove(&rw2);
-                    dd2.borrow_mut().retain(|e| e.id != eid2);
-                    let n = dd2.borrow().len();
-                    bd2.set_title(&format!(
-                        "🔐 {} entrée{}",
-                        n, if n > 1 { "s" } else { "" }
-                    ));
-                    glib::g_debug!(APP_ID, "Entrée supprimée");
-                }
-            },
-        );
-    });
-    row_box.append(&del_btn);
-    row.set_child(Some(&row_box));
-    row
 }
 
 fn setup_autolock(
