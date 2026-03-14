@@ -75,7 +75,7 @@ impl GeneratorConfig {
     }
 
     /// Fisher-Yates shuffle via OsRng.
-    fn shuffle(v: &mut Vec<u8>) {
+    fn shuffle(v: &mut [u8]) {
         let n = v.len();
         for i in (1..n).rev() {
             let j = Self::rand_index(i + 1);

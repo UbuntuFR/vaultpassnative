@@ -115,7 +115,7 @@ impl Theme {
 use std::cell::OnceCell;
 
 thread_local! {
-    static CUSTOM_CSS_PROVIDER: OnceCell<CssProvider> = OnceCell::new();
+    static CUSTOM_CSS_PROVIDER: OnceCell<CssProvider> = const { OnceCell::new() };
 }
 
 fn with_provider<F: FnOnce(&CssProvider)>(f: F) {

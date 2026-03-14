@@ -137,12 +137,12 @@ impl VaultStore {
         };
         match existing {
             None => {
-                let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
+                let enc = encrypt(key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
                 Ok(true)
             }
             Some(blob) => Ok(
-                decrypt(&**key, &blob)
+                decrypt(key, &blob)
                     .map(|p| p.as_slice() == SENTINEL_PLAINTEXT)
                     .unwrap_or(false)
             ),
@@ -239,10 +239,10 @@ impl VaultStore {
         let entries = self.list_entries()?;
         let tx = self.conn.unchecked_transaction()?;
         for e in &entries {
-            let plain_pw   = decrypt(&**old_key, &e.password_encrypted).map_err(StoreError::Cipher)?;
-            let new_pw_enc = encrypt(&*new_key, &plain_pw)?;
+            let plain_pw   = decrypt(old_key, &e.password_encrypted).map_err(StoreError::Cipher)?;
+            let new_pw_enc = encrypt(&new_key, &plain_pw)?;
             let new_notes_enc = match &e.notes_encrypted {
-                Some(enc) => Some(encrypt(&*new_key, &decrypt(&**old_key, enc).map_err(StoreError::Cipher)?)?),
+                Some(enc) => Some(encrypt(&new_key, &decrypt(old_key, enc).map_err(StoreError::Cipher)?)?),
                 None      => None,
             };
             tx.execute(
@@ -250,7 +250,7 @@ impl VaultStore {
                 params![new_pw_enc, new_notes_enc, e.id],
             )?;
         }
-        let new_sentinel = encrypt(&*new_key, SENTINEL_PLAINTEXT)?;
+        let new_sentinel = encrypt(&new_key, SENTINEL_PLAINTEXT)?;
         tx.execute(
             "UPDATE vault_meta SET salt=?1, sentinel=?2 WHERE id=1",
             params![new_salt.as_ref(), new_sentinel],
@@ -286,7 +286,7 @@ impl VaultStore {
 #[cfg(unix)]
 fn acquire_lock(path: &Path) -> Result<fs::File, StoreError> {
     use std::os::unix::io::AsRawFd;
-    let file = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    let file = fs::OpenOptions::new().create(true).truncate(true).write(true).open(path)?;
     let ret  = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if ret != 0 { return Err(StoreError::AlreadyLocked); }
     Ok(file)
@@ -294,7 +294,7 @@ fn acquire_lock(path: &Path) -> Result<fs::File, StoreError> {
 
 #[cfg(not(unix))]
 fn acquire_lock(path: &Path) -> Result<fs::File, StoreError> {
-    Ok(fs::OpenOptions::new().create(true).write(true).open(path)?)
+    Ok(fs::OpenOptions::new().create(true).truncate(true).write(true).open(path)?)
 }
 
 // ---- Tests ----

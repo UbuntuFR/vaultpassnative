@@ -84,7 +84,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     let initial = entry.title.chars().next()
         .unwrap_or('?').to_uppercase().next().unwrap_or('?');
     let color   = initial_color(&entry.title);
-    let avatar  = Label::builder().label(&initial.to_string()).width_chars(2).build();
+    let avatar  = Label::builder().label(initial.to_string()).width_chars(2).build();
     avatar.set_size_request(32, 32);
     let provider = gtk4::CssProvider::new();
     provider.load_from_string(&format!(
@@ -375,8 +375,8 @@ fn build_vault(
         let mut visible = 0usize;
         let mut i       = 0i32;
         while let Some(row) = ctx_f.entries_list.row_at_index(i) {
-            let show = db.get(i as usize).map_or(true, |e| {
-                let cat_ok  = cat.as_deref().map_or(true, |c| e.category == c);
+            let show = db.get(i as usize).is_none_or(|e| {
+                let cat_ok  = cat.as_deref().is_none_or(|c| e.category == c);
                 let srch_ok = q.is_empty()
                     || e.title.to_lowercase().contains(&q)
                     || e.username.to_lowercase().contains(&q)

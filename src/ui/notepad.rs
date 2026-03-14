@@ -57,7 +57,7 @@ pub fn build_notepad(
     textview.set_vexpand(true);
 
     if let Ok(Some(enc)) = store.load_notepad() {
-        if let Ok(plain) = cipher::decrypt(&**key, &enc) {
+        if let Ok(plain) = cipher::decrypt(&key, &enc) {
             if let Ok(text) = std::str::from_utf8(&plain) {
                 textview.buffer().set_text(text);
             }
@@ -84,7 +84,7 @@ pub fn build_notepad(
             move || {
                 let (start, end) = buf2.bounds();
                 let text = buf2.text(&start, &end, false).to_string();
-                match cipher::encrypt(&**key2, text.as_bytes()) {
+                match cipher::encrypt(&key2, text.as_bytes()) {
                     Ok(enc) => { let _ = store2.save_notepad(&enc); }
                     Err(e)  => glib::g_warning!("vaultpass", "notepad encrypt: {}", e),
                 }

@@ -144,11 +144,11 @@ pub fn from_bitwarden_json(
             }
         }
 
-        let pw_enc       = cipher::encrypt(&**key, password.as_bytes())?;
+        let pw_enc       = cipher::encrypt(key, password.as_bytes())?;
         let secrets_json = secrets.to_json().map_err(ImportError::Json)?;
         let empty_secrets: &[u8] = br#"{"notes":"","fields":[]}"#;
         let notes_enc    = if secrets_json.as_slice() != empty_secrets {
-            Some(cipher::encrypt(&**key, &secrets_json)?)
+            Some(cipher::encrypt(key, &secrets_json)?)
         } else {
             None
         };
@@ -222,13 +222,13 @@ pub fn from_csv(
             continue;
         }
 
-        let pw_enc  = cipher::encrypt(&**key, password.as_bytes())
+        let pw_enc  = cipher::encrypt(key, password.as_bytes())
             .map_err(|e| ImportError::Csv(format!("ligne {}: {}", lineno+2, e)))?;
 
         let notes_enc = if !notes_s.is_empty() {
             let s = EntrySecrets { notes: notes_s, fields: Vec::new() };
             let j = s.to_json().map_err(ImportError::Json)?;
-            Some(cipher::encrypt(&**key, &j)
+            Some(cipher::encrypt(key, &j)
                 .map_err(|e| ImportError::Csv(format!("ligne {}: {}", lineno+2, e)))?)
         } else {
             None

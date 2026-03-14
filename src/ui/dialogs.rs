@@ -453,7 +453,7 @@ pub fn show_add_dialog(
             gtk4::glib::g_warning!(APP_ID, "Titre et mot de passe obligatoires");
             return;
         };
-        let Some(entry) = data.encrypt_into(&**ctx.key, EntryId::new(), now_unix())
+        let Some(entry) = data.encrypt_into(&ctx.key, EntryId::new(), now_unix())
         else {
             gtk4::glib::g_critical!(APP_ID, "Échec chiffrement");
             return;
@@ -480,15 +480,15 @@ pub fn show_edit_dialog(
     ctx:    VaultContext,
     row:    ListBoxRow,
 ) {
-    let current_pw = cipher::decrypt(&**ctx.key, &entry.password_encrypted)
+    let current_pw = cipher::decrypt(&ctx.key, &entry.password_encrypted)
         .map(|b| String::from_utf8_lossy(&b).to_string())
         .unwrap_or_default();
     let current_secrets: EntrySecrets = entry.notes_encrypted.as_ref()
-        .and_then(|enc| cipher::decrypt(&**ctx.key, enc).ok())
+        .and_then(|enc| cipher::decrypt(&ctx.key, enc).ok())
         .and_then(|b| EntrySecrets::from_json(&b).ok())
         // Compatibilité anciens enregistrements (notes en texte brut)
         .or_else(|| entry.notes_encrypted.as_ref()
-            .and_then(|enc| cipher::decrypt(&**ctx.key, enc).ok())
+            .and_then(|enc| cipher::decrypt(&ctx.key, enc).ok())
             .map(|b| EntrySecrets {
                 notes: String::from_utf8_lossy(&b).to_string(),
                 fields: Vec::new(),
@@ -533,7 +533,7 @@ pub fn show_edit_dialog(
             gtk4::glib::g_warning!(APP_ID, "Titre et mot de passe obligatoires");
             return;
         };
-        let Some(updated) = data.encrypt_into(&**ctx.key, entry_id.clone(), created_at)
+        let Some(updated) = data.encrypt_into(&ctx.key, entry_id.clone(), created_at)
         else {
             gtk4::glib::g_critical!(APP_ID, "Échec chiffrement");
             return;
@@ -573,7 +573,7 @@ pub fn show_delete_confirm(
     on_confirm: impl Fn() + 'static,
 ) {
     let alert = AlertDialog::builder()
-        .heading(&format!("Supprimer \"{}\" ?", title))
+        .heading(format!("Supprimer \"{}\" ?", title))
         .body("Cette action est irréversible.")
         .default_response("cancel")
         .close_response("cancel")
