@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=VaultPass
+Comment=Gestionnaire de mots de passe sécurisé
+Comment[en]=Secure password manager
+Exec=vaultpass-native
+Icon=com.vaultpass.VaultPass
+Terminal=false
+Type=Application
+Categories=Utility;Security;
+Keywords=mot de passe;password;vault;security;chiffrement;encryption;
+Keywords[en]=password;vault;security;encryption;
+StartupWMClass=vaultpass-native
+StartupNotify=true
