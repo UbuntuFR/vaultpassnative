@@ -25,7 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
+const APP_ID: &str = "com.vaultpass.VaultPass";
 
 fn db_path() -> std::path::PathBuf {
     let mut p = glib::user_data_dir();
