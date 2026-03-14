@@ -72,13 +72,16 @@ pub fn build_notepad(
     let key_s   = key.clone();
 
     textview.buffer().connect_changed(move |buf| {
+        // FIX #5: Properly cancel previous timer before creating new one
         if let Some(id) = save_timer_id.borrow_mut().take() {
             id.remove();
         }
+        
         let store2   = store_s.clone();
         let key2     = key_s.clone();
         let buf2     = buf.clone();
         let timer_rc = save_timer_id.clone();
+        
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(1000),
             move || {
