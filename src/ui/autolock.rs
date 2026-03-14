@@ -3,6 +3,7 @@ use std::rc::Rc;
 use gtk4::glib::source::timeout_add_seconds_local;
 use gtk4::glib::ControlFlow;
 
+/// LockDelay enum - using sentinel value instead of u64::MAX to avoid overflow
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LockDelay {
@@ -12,10 +13,9 @@ pub enum LockDelay {
     FifteenMin = 900,
     ThirtyMin  = 1800,
     OneHour    = 3600,
-    Never      = u64::MAX as isize,
+    Never      = -1,  // FIX #2: Use -1 as sentinel instead of u64::MAX to avoid overflow
 }
 
-#[allow(dead_code)]
 impl LockDelay {
     pub fn label(&self) -> &'static str {
         match self {
@@ -41,6 +41,7 @@ impl LockDelay {
         ]
     }
 
+    /// Convert seconds to LockDelay - handles u64::MAX specially
     pub fn from_secs(s: u64) -> Self {
         match s {
             60   => LockDelay::OneMin,
@@ -49,7 +50,26 @@ impl LockDelay {
             900  => LockDelay::FifteenMin,
             1800 => LockDelay::ThirtyMin,
             3600 => LockDelay::OneHour,
+            u64::MAX => LockDelay::Never,  // FIX #2: Handle u64::MAX as Never
             _    => LockDelay::Never,
+        }
+    }
+
+    /// Check if this delay represents "Never"
+    pub fn is_never(&self) -> bool {
+        matches!(self, LockDelay::Never)
+    }
+
+    /// Convert to seconds for storage
+    pub fn to_secs(&self) -> u64 {
+        match self {
+            LockDelay::OneMin     => 60,
+            LockDelay::TwoMin     => 120,
+            LockDelay::FiveMin    => 300,
+            LockDelay::FifteenMin => 900,
+            LockDelay::ThirtyMin  => 1800,
+            LockDelay::OneHour    => 3600,
+            LockDelay::Never      => u64::MAX,  // FIX #2: Return u64::MAX for Never
         }
     }
 }
@@ -84,6 +104,7 @@ impl AutoLock {
 
     pub fn is_expired(&self) -> bool {
         let delay = self.delay.get();
+        // FIX #2: Properly handle u64::MAX as "never expire"
         if delay == u64::MAX { return false; }
         Self::now().saturating_sub(self.last_activity.get()) >= delay
     }
@@ -105,6 +126,7 @@ impl AutoLock {
 
         timeout_add_seconds_local(5, move || {
             let d = delay.get();
+            // FIX #2: Properly handle u64::MAX (Never) case
             if d == u64::MAX { return ControlFlow::Continue; }
             let elapsed = Self::now().saturating_sub(last.get());
             if elapsed >= d && !locked.get() {
