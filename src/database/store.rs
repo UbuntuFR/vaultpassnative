@@ -1,6 +1,8 @@
 use rusqlite::{Connection, Result as SqlResult, params, OptionalExtension};
 use thiserror::Error;
 use zeroize::Zeroizing;
+use std::path::{Path, PathBuf};
+use std::fs;
 use crate::database::models::{VaultEntry, EntryId};
 use crate::crypto::cipher::{encrypt, decrypt, SENTINEL_PLAINTEXT, CipherError};
 use crate::crypto::kdf;
@@ -13,19 +15,32 @@ pub enum StoreError {
     Cipher(#[from] CipherError),
     #[error("Erreur KDF : {0}")]
     Kdf(String),
-    #[error("Entrée introuvable : {0}")]
+    #[error("Entr\u00e9e introuvable : {0}")]
     NotFound(String),
+    #[error("Erreur I/O : {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Base de donn\u00e9es verrouill\u00e9e par une autre instance de VaultPass")]
+    AlreadyLocked,
 }
 
 pub struct VaultStore {
-    conn: Connection,
+    conn:      Connection,
+    db_path:   Option<PathBuf>,
+    _lock_file: Option<fs::File>,
 }
 
 impl VaultStore {
+    /// Ouvre la base sur disque avec lock exclusif.
     pub fn open(path: &str) -> Result<Self, StoreError> {
-        let conn = Connection::open(path)?;
+        let db_path  = PathBuf::from(path);
+        let lock_path = db_path.with_extension("lock");
+
+        // Lock exclusif non-bloquant
+        let lock_file = acquire_lock(&lock_path)?;
+
+        let conn = Connection::open(&db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        let store = VaultStore { conn };
+        let mut store = VaultStore { conn, db_path: Some(db_path), _lock_file: Some(lock_file) };
         store.migrate()?;
         Ok(store)
     }
@@ -33,18 +48,18 @@ impl VaultStore {
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn  = Connection::open_in_memory()?;
-        let store = VaultStore { conn };
+        let mut store = VaultStore { conn, db_path: None, _lock_file: None };
         store.migrate()?;
         Ok(store)
     }
 
-    fn migrate(&self) -> Result<(), StoreError> {
+    fn migrate(&mut self) -> Result<(), StoreError> {
         self.conn.execute_batch("
             CREATE TABLE IF NOT EXISTS vault_meta (
                 id       INTEGER PRIMARY KEY,
                 salt     BLOB    NOT NULL,
                 sentinel BLOB,
-                version  INTEGER NOT NULL DEFAULT 1
+                version  INTEGER NOT NULL DEFAULT 2
             );
             CREATE TABLE IF NOT EXISTS entries (
                 id                 TEXT    PRIMARY KEY,
@@ -52,7 +67,7 @@ impl VaultStore {
                 username           TEXT    NOT NULL,
                 password_encrypted BLOB    NOT NULL,
                 url                TEXT,
-                category           TEXT    NOT NULL DEFAULT 'Général',
+                category           TEXT    NOT NULL DEFAULT 'G\u00e9n\u00e9ral',
                 notes_encrypted    BLOB,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
@@ -61,23 +76,23 @@ impl VaultStore {
             CREATE INDEX IF NOT EXISTS idx_entries_updated  ON entries(updated_at DESC);
         ")?;
 
+        // Migration colonne sentinel (bases v1)
         let sentinel_exists: bool = self.conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('vault_meta') WHERE name='sentinel'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0) > 0;
-
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap_or(0) > 0;
         if !sentinel_exists {
             self.conn.execute_batch("ALTER TABLE vault_meta ADD COLUMN sentinel BLOB;")?;
         }
         Ok(())
     }
 
+    // ---- sel ----
+
     pub fn save_salt(&self, salt: &[u8]) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO vault_meta (id, salt, version) VALUES (1, ?1, 1)",
+            "INSERT OR IGNORE INTO vault_meta (id, salt, version) VALUES (1, ?1, 2)",
             params![salt],
         )?;
         Ok(())
@@ -88,36 +103,32 @@ impl VaultStore {
         Ok(stmt.query_row([], |row| row.get(0)).optional()?)
     }
 
+    // ---- sentinel ----
+
     pub fn verify_or_init_sentinel(
         &self,
         key: &Zeroizing<[u8; 32]>,
     ) -> Result<bool, StoreError> {
         let existing: Option<Vec<u8>> = {
-            let mut stmt = self.conn
-                .prepare("SELECT sentinel FROM vault_meta WHERE id=1")?;
+            let mut stmt = self.conn.prepare("SELECT sentinel FROM vault_meta WHERE id=1")?;
             stmt.query_row([], |row| row.get::<_, Option<Vec<u8>>>(0))
-                .optional()?
-                .flatten()
+                .optional()?.flatten()
         };
-
         match existing {
-            None => {
-                let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
-                self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
-                Ok(true)
-            }
-            Some(ref blob) if blob.is_empty() => {
+            None | Some(ref b) if b.as_ref().map_or(true, |v: &Vec<u8>| v.is_empty()) => {
                 let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
                 Ok(true)
             }
             Some(blob) => Ok(
                 decrypt(&**key, &blob)
-                    .map(|plain| plain.as_slice() == SENTINEL_PLAINTEXT)
+                    .map(|p| p.as_slice() == SENTINEL_PLAINTEXT)
                     .unwrap_or(false)
             ),
         }
     }
+
+    // ---- CRUD ----
 
     pub fn insert_entry(&self, entry: &VaultEntry) -> Result<(), StoreError> {
         self.conn.execute(
@@ -177,37 +188,76 @@ impl VaultStore {
         Ok(())
     }
 
+    // ---- Changement de mot de passe (atomique + backup) ----
+
     pub fn change_master_password(
         &self,
         old_key:      &Zeroizing<[u8; 32]>,
         new_password: &[u8],
     ) -> Result<(), StoreError> {
+        // 1. Backup avant toute modification
+        if let Some(ref db_path) = self.db_path {
+            let bak = db_path.with_extension("db.bak");
+            fs::copy(db_path, &bak)?;
+        }
+
+        // 2. Derive nouvelle cle
         let new_salt   = kdf::generate_salt();
         let new_master = kdf::derive_master_key(new_password, &new_salt)
             .map_err(|e| StoreError::Kdf(e.to_string()))?;
-        let new_key    = new_master.0;
+        let new_key = new_master.0;
 
-        for e in &self.list_entries()? {
+        // 3. TRANSACTION ATOMIQUE : tout ou rien
+        let entries = self.list_entries()?;
+        let tx = self.conn.unchecked_transaction()?;
+
+        for e in &entries {
             let plain_pw   = decrypt(&**old_key, &e.password_encrypted).map_err(StoreError::Cipher)?;
             let new_pw_enc = encrypt(&*new_key, &plain_pw)?;
             let new_notes_enc = match &e.notes_encrypted {
-                Some(enc) => Some(encrypt(&*new_key, &decrypt(&**old_key, enc).map_err(StoreError::Cipher)?)? ),
+                Some(enc) => Some(encrypt(&*new_key, &decrypt(&**old_key, enc).map_err(StoreError::Cipher)?)?),
                 None      => None,
             };
-            self.conn.execute(
+            tx.execute(
                 "UPDATE entries SET password_encrypted=?1, notes_encrypted=?2 WHERE id=?3",
                 params![new_pw_enc, new_notes_enc, e.id],
             )?;
         }
 
         let new_sentinel = encrypt(&*new_key, SENTINEL_PLAINTEXT)?;
-        self.conn.execute(
+        tx.execute(
             "UPDATE vault_meta SET salt=?1, sentinel=?2 WHERE id=1",
             params![new_salt.as_ref(), new_sentinel],
         )?;
+
+        tx.commit()?;
         Ok(())
     }
+
+    pub fn db_path(&self) -> Option<&Path> {
+        self.db_path.as_deref()
+    }
 }
+
+// ---- Lock fichier exclusif (Unix flock) ----
+
+#[cfg(unix)]
+fn acquire_lock(path: &Path) -> Result<fs::File, StoreError> {
+    use std::os::unix::io::AsRawFd;
+    let file = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    let ret  = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if ret != 0 {
+        return Err(StoreError::AlreadyLocked);
+    }
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn acquire_lock(path: &Path) -> Result<fs::File, StoreError> {
+    Ok(fs::OpenOptions::new().create(true).write(true).open(path)?)
+}
+
+// ---- Tests ----
 
 #[cfg(test)]
 mod tests {
@@ -223,7 +273,7 @@ mod tests {
             id:                 EntryId::new(),
             title:              "GitHub".to_string(),
             username:           "user@example.com".to_string(),
-            password_encrypted: cipher::encrypt(&**key, b"secret123").unwrap(),
+            password_encrypted: cipher::encrypt(&*key, b"secret123").unwrap(),
             url:                Some("https://github.com".to_string()),
             category:           "Pro".to_string(),
             notes_encrypted:    None,
@@ -334,5 +384,30 @@ mod tests {
         let list  = store.list_entries().unwrap();
         let dec   = cipher::decrypt(&*key, list[0].notes_encrypted.as_ref().unwrap()).unwrap();
         assert_eq!(&*dec, b"notes secretes");
+    }
+
+    #[test]
+    fn test_change_password_atomicity_in_memory() {
+        // Verifie que change_master_password fonctionne en memoire (pas de backup)
+        let store = VaultStore::open_in_memory().unwrap();
+        let salt  = kdf::generate_salt();
+        let key   = kdf::derive_master_key(b"pass1", &salt).unwrap().0;
+        store.save_salt(&salt).unwrap();
+        store.verify_or_init_sentinel(&key).unwrap();
+        for i in 0..5 {
+            let mut e = make_entry(&key);
+            e.title = format!("Entry {}", i);
+            store.insert_entry(&e).unwrap();
+        }
+        store.change_master_password(&key, b"pass2").unwrap();
+        let new_salt: [u8; 32] = store.load_salt().unwrap().unwrap().try_into().unwrap();
+        let new_key = kdf::derive_master_key(b"pass2", &new_salt).unwrap().0;
+        assert!(store.verify_or_init_sentinel(&new_key).unwrap());
+        let entries = store.list_entries().unwrap();
+        assert_eq!(entries.len(), 5);
+        for e in &entries {
+            let plain = cipher::decrypt(&*new_key, &e.password_encrypted).unwrap();
+            assert_eq!(&*plain, b"secret123");
+        }
     }
 }
