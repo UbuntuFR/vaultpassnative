@@ -32,10 +32,12 @@ finish-args:
   - --lock-file=/run/user/1000/vaultpass.lock
 
 build-options:
-  network: true
+  build-args:
+    - --share=network
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/vaultpass-native/cargo
+    CARGO_NET_OFFLINE: "false"
 
 modules:
   - name: vaultpass-native
