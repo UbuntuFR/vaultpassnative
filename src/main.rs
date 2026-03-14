@@ -13,7 +13,7 @@ use libadwaita::{
 use gtk4::{
     Box as GtkBox, Orientation, Label, SearchEntry,
     ListBox, ListBoxRow, SelectionMode, ScrolledWindow,
-    Separator, Button, Stack, PasswordEntry,
+    Separator, Button, PasswordEntry,
 };
 
 use crypto::{kdf, cipher};
@@ -76,7 +76,7 @@ fn build_vault(
         store.list_entries().unwrap_or_default()
     ));
 
-    // ── SIDEBAR ──────────────────────────────────────────────────
+    // ── SIDEBAR ──────────────────────────────────────────────────────────
     let sidebar_box    = GtkBox::new(Orientation::Vertical, 0);
     let sidebar_header = HeaderBar::new();
     sidebar_header.set_show_end_title_buttons(false);
@@ -112,7 +112,6 @@ fn build_vault(
     sidebar_box.append(&category_list);
     sidebar_box.append(&Separator::new(Orientation::Horizontal));
 
-    // ── Paramètres dans la sidebar ──
     let settings_list = ListBox::new();
     settings_list.add_css_class("navigation-sidebar");
     let sr = ListBoxRow::new();
@@ -124,13 +123,12 @@ fn build_vault(
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
-    // Connexion du bouton Paramètres
     let ws = window.clone();
     settings_list.connect_row_activated(move |_, _| {
         ui::dialogs::show_settings_dialog(ws.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── CONTENU ──────────────────────────────────────────────────
+    // ── CONTENU ──────────────────────────────────────────────────────────
     let content_box = GtkBox::new(Orientation::Vertical, 0);
     content_box.set_vexpand(true);
     let content_header = HeaderBar::new();
@@ -148,7 +146,7 @@ fn build_vault(
     content_box.append(&content_header);
 
     let count  = db_entries.borrow().len();
-    let banner = Banner::new(&format!("🔐 {} entrées — AES-256-GCM + Argon2id", count));
+    let banner = Banner::new(&format!("🔐 {} entrée{}", count, if count > 1 { "s" } else { "" }));
     banner.set_revealed(true);
     content_box.append(&banner);
 
@@ -175,7 +173,7 @@ fn build_vault(
     scroll.set_child(Some(&entries_list));
     content_box.append(&scroll);
 
-    // ── Filtre ──────────────────────────────────────────────────
+    // ── Filtre ───────────────────────────────────────────────────────────
     let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
@@ -209,10 +207,10 @@ fn build_vault(
         let txt = sel
             .and_then(|r| r.child().and_downcast_ref::<Label>().map(|l| l.text().to_string()))
             .unwrap_or_default();
-        *cf1.borrow_mut() = if txt.contains("Perso") { Some("Perso".to_string()) }
-            else if txt.contains("Pro")     { Some("Pro".to_string()) }
-            else if txt.contains("Finance") { Some("Finance".to_string()) }
-            else { None };
+        *cf1.borrow_mut() = if txt.contains("Perso")       { Some("Perso".to_string()) }
+            else if txt.contains("Pro")                     { Some("Pro".to_string()) }
+            else if txt.contains("Finance")                 { Some("Finance".to_string()) }
+            else                                             { None };
         af1();
     });
 
@@ -223,7 +221,7 @@ fn build_vault(
         af2();
     });
 
-    // ── Verrouiller ──────────────────────────────────────────────
+    // ── Verrouiller ──────────────────────────────────────────────────────
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
         let login = build_login_screen(wl.clone());
@@ -233,13 +231,13 @@ fn build_vault(
         glib::g_debug!(APP_ID, "Coffre verrouillé manuellement");
     });
 
-    // ── Générateur ───────────────────────────────────────────────
+    // ── Générateur ───────────────────────────────────────────────────────
     let wg = window.clone();
     gen_btn.connect_clicked(move |_| {
         ui::dialogs::show_generator_dialog(wg.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── Nouvelle entrée ──────────────────────────────────────────
+    // ── Nouvelle entrée ──────────────────────────────────────────────────
     let st2  = store.clone();
     let ka   = key_bytes.clone();
     let el_a = entries_list.clone();
@@ -254,7 +252,7 @@ fn build_vault(
         );
     });
 
-    // ── NavigationSplitView ──────────────────────────────────────
+    // ── NavigationSplitView ──────────────────────────────────────────────
     let split_view = NavigationSplitView::new();
     split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Catégories")));
     split_view.set_content(Some(&NavigationPage::new(&content_box, "Entrées")));
@@ -484,9 +482,10 @@ pub fn build_entry_row(
                 if sd2.delete_entry(&eid2).is_ok() {
                     ld2.remove(&rw2);
                     dd2.borrow_mut().retain(|e| e.id != eid2);
+                    let n = dd2.borrow().len();
                     bd2.set_title(&format!(
-                        "🔐 {} entrées — AES-256-GCM + Argon2id",
-                        dd2.borrow().len()
+                        "🔐 {} entrée{}",
+                        n, if n > 1 { "s" } else { "" }
                     ));
                     glib::g_debug!(APP_ID, "Entrée supprimée");
                 }
@@ -534,7 +533,3 @@ fn setup_autolock(
 
     al
 }
-
-// Supprimer l'import inutilisé
-#[allow(dead_code)]
-fn _unused_stack() -> Stack { Stack::new() }
