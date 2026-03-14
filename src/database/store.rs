@@ -1,11 +1,15 @@
 use rusqlite::{Connection, Result as SqlResult, params, OptionalExtension};
 use thiserror::Error;
+use zeroize::Zeroizing;
 use crate::database::models::VaultEntry;
+use crate::crypto::cipher::{encrypt, decrypt, SENTINEL_PLAINTEXT, CipherError};
 
 #[derive(Error, Debug)]
 pub enum StoreError {
     #[error("Erreur SQLite : {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("Erreur de chiffrement : {0}")]
+    Cipher(#[from] CipherError),
     #[error("Entrée introuvable : {0}")]
     NotFound(String),
 }
@@ -17,7 +21,9 @@ pub struct VaultStore {
 impl VaultStore {
     /// Ouvre (ou crée) la base de données au chemin donné.
     pub fn open(path: &str) -> Result<Self, StoreError> {
-        let conn = Connection::open(path)?;
+        let conn  = Connection::open(path)?;
+        // Active WAL pour des écritures plus robustes
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let store = VaultStore { conn };
         store.migrate()?;
         Ok(store)
@@ -27,23 +33,26 @@ impl VaultStore {
     fn migrate(&self) -> Result<(), StoreError> {
         self.conn.execute_batch("
             CREATE TABLE IF NOT EXISTS vault_meta (
-                id      INTEGER PRIMARY KEY,
-                salt    BLOB NOT NULL,
-                version INTEGER NOT NULL DEFAULT 1
+                id               INTEGER PRIMARY KEY,
+                salt             BLOB    NOT NULL,
+                sentinel         BLOB,
+                version          INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS entries (
-                id                 TEXT PRIMARY KEY,
-                title              TEXT NOT NULL,
-                username           TEXT NOT NULL,
-                password_encrypted BLOB NOT NULL,
+                id                 TEXT    PRIMARY KEY,
+                title              TEXT    NOT NULL,
+                username           TEXT    NOT NULL,
+                password_encrypted BLOB    NOT NULL,
                 url                TEXT,
-                category           TEXT NOT NULL DEFAULT 'Général',
+                category           TEXT    NOT NULL DEFAULT 'Général',
                 notes_encrypted    BLOB,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_entries_category
                 ON entries(category);
+            CREATE INDEX IF NOT EXISTS idx_entries_updated
+                ON entries(updated_at DESC);
         ")?;
         Ok(())
     }
@@ -65,6 +74,39 @@ impl VaultStore {
             .query_row([], |row| row.get(0))
             .optional()?;
         Ok(result)
+    }
+
+    /// Vérifie le mot de passe maître via la sentinelle chiffrée.
+    /// - Si aucune sentinelle n'existe (premier lancement) → la crée et retourne Ok(true).
+    /// - Si la sentinelle existe → tente de déchiffrer et compare.
+    /// - Retourne Ok(false) si le mot de passe est incorrect.
+    pub fn verify_or_init_sentinel(
+        &self,
+        key: &Zeroizing<[u8; 32]>,
+    ) -> Result<bool, StoreError> {
+        let existing: Option<Vec<u8>> = {
+            let mut stmt = self.conn
+                .prepare("SELECT sentinel FROM vault_meta WHERE id = 1")?;
+            stmt.query_row([], |row| row.get(0)).optional()?
+        };
+
+        match existing {
+            // Pas encore de sentinelle : coffre vierge, on l'initialise
+            None | Some(ref v) if v.is_empty() => {
+                let encrypted = encrypt(key.as_ref(), SENTINEL_PLAINTEXT)?;
+                self.conn.execute(
+                    "UPDATE vault_meta SET sentinel = ?1 WHERE id = 1",
+                    params![encrypted],
+                )?;
+                Ok(true)
+            }
+            Some(blob) => {
+                match decrypt(key.as_ref(), &blob) {
+                    Ok(plain) => Ok(&*plain == SENTINEL_PLAINTEXT),
+                    Err(_)    => Ok(false),
+                }
+            }
+        }
     }
 
     /// Insère une nouvelle entrée chiffrée.
@@ -89,10 +131,8 @@ impl VaultStore {
         Ok(())
     }
 
-    /// Retourne toutes les entrées (mot de passe encore chiffré).
-    /// 🦀 CONCEPT — impl Trait en retour :
-    /// On retourne un Vec<VaultEntry>, pas un type opaque ici,
-    /// mais Result<T,E> évite tout panic si SQLite échoue.
+    /// Retourne toutes les entrées (mot de passe encore chiffré),
+    /// triées par date de mise à jour décroissante.
     pub fn list_entries(&self) -> Result<Vec<VaultEntry>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, username, password_encrypted, url,

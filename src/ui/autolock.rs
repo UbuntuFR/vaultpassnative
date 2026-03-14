@@ -6,11 +6,11 @@ use gtk4::glib::ControlFlow;
 /// Durées de verrouillage disponibles (en secondes)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LockDelay {
-    TwoMin    = 120,
-    FiveMin   = 300,
-    FifteenMin= 900,
-    ThirtyMin = 1800,
-    OneHour   = 3600,
+    TwoMin     = 120,
+    FiveMin    = 300,
+    FifteenMin = 900,
+    ThirtyMin  = 1800,
+    OneHour    = 3600,
 }
 
 impl LockDelay {
@@ -35,9 +35,7 @@ impl LockDelay {
     }
 }
 
-/// Gestionnaire d'auto-verrouillage.
-/// last_activity : timestamp Unix de la dernière interaction.
-/// delay         : délai choisi par l'utilisateur.
+/// Gestionnaire d'auto-verrouillage basé sur l'inactivité.
 pub struct AutoLock {
     pub last_activity: Rc<Cell<u64>>,
     pub delay:         Rc<Cell<u64>>,
@@ -80,15 +78,13 @@ impl AutoLock {
     where
         F: Fn() + 'static,
     {
-        let last = self.last_activity.clone();
+        let last  = self.last_activity.clone();
         let delay = self.delay.clone();
 
         timeout_add_seconds_local(10, move || {
             let elapsed = Self::now().saturating_sub(last.get());
             if elapsed >= delay.get() {
                 on_lock();
-                // Remettre à "maintenant" pour ne pas re-déclencher
-                // immédiatement si l'utilisateur se reconnecte vite
                 last.set(Self::now());
             }
             ControlFlow::Continue
