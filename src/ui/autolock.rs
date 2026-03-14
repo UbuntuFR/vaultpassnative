@@ -60,6 +60,7 @@ pub struct AutoLock {
     pub locked:        Rc<Cell<bool>>,
 }
 
+#[allow(dead_code)]
 impl AutoLock {
     pub fn new(delay_secs: u64) -> Self {
         Self {
