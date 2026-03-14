@@ -3,7 +3,9 @@ use std::rc::Rc;
 use gtk4::glib::source::timeout_add_seconds_local;
 use gtk4::glib::ControlFlow;
 
-/// Durées de verrouillage disponibles (en secondes)
+/// Durées de verrouillage disponibles (en secondes).
+/// Les variantes non encore utilisées dans l'UI sont conservées pour les préférences futures.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LockDelay {
     TwoMin     = 120,
@@ -13,6 +15,7 @@ pub enum LockDelay {
     OneHour    = 3600,
 }
 
+#[allow(dead_code)]
 impl LockDelay {
     pub fn label(&self) -> &'static str {
         match self {
@@ -62,11 +65,13 @@ impl AutoLock {
     }
 
     /// Retourne true si le délai d'inactivité est dépassé.
+    #[allow(dead_code)]
     pub fn is_expired(&self) -> bool {
         Self::now().saturating_sub(self.last_activity.get()) >= self.delay.get()
     }
 
     /// Change le délai (depuis les préférences).
+    #[allow(dead_code)]
     pub fn set_delay(&self, delay: LockDelay) {
         self.delay.set(delay as u64);
         self.reset();
