@@ -65,11 +65,13 @@ impl VaultStore {
                 url                TEXT,
                 category           TEXT    NOT NULL DEFAULT 'Général',
                 notes_encrypted    BLOB,
+                is_favorite        INTEGER NOT NULL DEFAULT 0,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_entries_category ON entries(category);
-            CREATE INDEX IF NOT EXISTS idx_entries_updated  ON entries(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_entries_category  ON entries(category);
+            CREATE INDEX IF NOT EXISTS idx_entries_updated   ON entries(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_entries_favorite  ON entries(is_favorite);
         ")?;
 
         // Migration sentinel (bases v1)
@@ -90,6 +92,18 @@ impl VaultStore {
             ).unwrap_or(0) > 0;
         if !notepad_exists {
             self.conn.execute_batch("ALTER TABLE vault_meta ADD COLUMN notepad BLOB;")?;
+        }
+
+        // Migration is_favorite (bases v3)
+        let fav_exists: bool = self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('entries') WHERE name='is_favorite'",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap_or(0) > 0;
+        if !fav_exists {
+            self.conn.execute_batch(
+                "ALTER TABLE entries ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;"
+            )?;
         }
 
         Ok(())
@@ -140,12 +154,13 @@ impl VaultStore {
     pub fn insert_entry(&self, entry: &VaultEntry) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO entries
-             (id,title,username,password_encrypted,url,category,notes_encrypted,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+             (id,title,username,password_encrypted,url,category,notes_encrypted,is_favorite,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 entry.id, entry.title, entry.username,
                 entry.password_encrypted, entry.url, entry.category,
-                entry.notes_encrypted, entry.created_at, entry.updated_at,
+                entry.notes_encrypted, entry.is_favorite as i64,
+                entry.created_at, entry.updated_at,
             ],
         )?;
         Ok(())
@@ -155,12 +170,13 @@ impl VaultStore {
         let rows = self.conn.execute(
             "UPDATE entries SET
                 title=?1, username=?2, password_encrypted=?3,
-                url=?4, category=?5, notes_encrypted=?6, updated_at=?7
-             WHERE id=?8",
+                url=?4, category=?5, notes_encrypted=?6,
+                is_favorite=?7, updated_at=?8
+             WHERE id=?9",
             params![
                 entry.title, entry.username, entry.password_encrypted,
                 entry.url, entry.category, entry.notes_encrypted,
-                entry.updated_at, entry.id,
+                entry.is_favorite as i64, entry.updated_at, entry.id,
             ],
         )?;
         if rows == 0 { return Err(StoreError::NotFound(entry.id.to_string())); }
@@ -170,7 +186,7 @@ impl VaultStore {
     pub fn list_entries(&self) -> Result<Vec<VaultEntry>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id,title,username,password_encrypted,url,
-                    category,notes_encrypted,created_at,updated_at
+                    category,notes_encrypted,is_favorite,created_at,updated_at
              FROM entries ORDER BY updated_at DESC"
         )?;
         let entries = stmt.query_map([], |row| {
@@ -182,8 +198,9 @@ impl VaultStore {
                 url:                row.get(4)?,
                 category:           row.get(5)?,
                 notes_encrypted:    row.get(6)?,
-                created_at:         row.get(7)?,
-                updated_at:         row.get(8)?,
+                is_favorite:        row.get::<_, i64>(7)? != 0,
+                created_at:         row.get(8)?,
+                updated_at:         row.get(9)?,
             })
         })?.collect::<SqlResult<Vec<_>>>()?;
         Ok(entries)
@@ -192,6 +209,15 @@ impl VaultStore {
     pub fn delete_entry(&self, id: &EntryId) -> Result<(), StoreError> {
         let rows = self.conn.execute("DELETE FROM entries WHERE id=?1", params![id])?;
         if rows == 0 { return Err(StoreError::NotFound(id.to_string())); }
+        Ok(())
+    }
+
+    /// Bascule le favori d'une entrée.
+    pub fn toggle_favorite(&self, id: &EntryId) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE entries SET is_favorite = CASE WHEN is_favorite=1 THEN 0 ELSE 1 END WHERE id=?1",
+            params![id],
+        )?;
         Ok(())
     }
 
@@ -291,6 +317,7 @@ mod tests {
             url:                Some("https://github.com".to_string()),
             category:           "Pro".to_string(),
             notes_encrypted:    None,
+            is_favorite:        false,
             created_at:         1_700_000_000,
             updated_at:         1_700_000_000,
         }
@@ -433,5 +460,19 @@ mod tests {
         store.save_notepad(&enc).unwrap();
         let loaded = store.load_notepad().unwrap().unwrap();
         assert_eq!(loaded, enc);
+    }
+
+    #[test]
+    fn test_toggle_favorite() {
+        let store = VaultStore::open_in_memory().unwrap();
+        let key   = make_key();
+        let entry = make_entry(&key);
+        let id    = entry.id.clone();
+        store.insert_entry(&entry).unwrap();
+        assert!(!store.list_entries().unwrap()[0].is_favorite);
+        store.toggle_favorite(&id).unwrap();
+        assert!(store.list_entries().unwrap()[0].is_favorite);
+        store.toggle_favorite(&id).unwrap();
+        assert!(!store.list_entries().unwrap()[0].is_favorite);
     }
 }
