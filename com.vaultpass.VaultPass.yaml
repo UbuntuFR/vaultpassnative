@@ -32,6 +32,8 @@ finish-args:
   - --lock-file=/run/user/1000/vaultpass.lock
 
 build-options:
+  build-args:
+    - --share=network
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/vaultpass-native/cargo
@@ -44,6 +46,7 @@ modules:
       - install -Dm755 target/release/vaultpass-native /app/bin/vaultpass-native
       - install -Dm644 com.vaultpass.VaultPass.desktop /app/share/applications/com.vaultpass.VaultPass.desktop
       - install -Dm644 com.vaultpass.VaultPass.metainfo.xml /app/share/metainfo/com.vaultpass.VaultPass.metainfo.xml
+      - install -Dm644 data/icons/com.vaultpass.VaultPass.svg /app/share/icons/hicolor/scalable/apps/com.vaultpass.VaultPass.svg
     sources:
       - type: dir
         path: .
