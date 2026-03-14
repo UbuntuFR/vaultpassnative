@@ -62,8 +62,10 @@ fn build_ui(app: &Application) {
         .build());
     window.set_content(Some(&build_login_screen(window.clone())));
     let autolock = setup_autolock(window.upcast_ref::<gtk4::Window>(), window.clone());
+    // FIX #1: Properly maintain AutoLock for entire app lifetime
+    // Using std::mem::forget to ensure the Rc is never dropped
+    std::mem::forget(autolock);
     window.present();
-    let _ = &autolock; // maintenir en vie pour toute la durée de l'app
 }
 
 fn initial_color(title: &str) -> &'static str {
