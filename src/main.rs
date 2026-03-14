@@ -49,7 +49,6 @@ fn main() {
 }
 
 fn build_ui(app: &Application) {
-    // ── Fenêtre principale ───────────────────────────────────────
     let window = Rc::new(ApplicationWindow::builder()
         .application(app)
         .title("VaultPass Native")
@@ -57,154 +56,17 @@ fn build_ui(app: &Application) {
         .default_height(560)
         .build());
 
-    // ── Écran LOGIN ──────────────────────────────────────────────
-    // ToolbarView = conteneur Adwaita correct : 1 HeaderBar + contenu
-    let login_toolbar = ToolbarView::new();
-    let login_header  = HeaderBar::new();
-    login_header.set_title_widget(Some(
-        &Label::builder().label("VaultPass Native").css_classes(["heading"]).build()
-    ));
-    login_toolbar.add_top_bar(&login_header);
-
-    let login_box = GtkBox::new(Orientation::Vertical, 24);
-    login_box.set_valign(gtk4::Align::Center);
-    login_box.set_halign(gtk4::Align::Center);
-    login_box.set_margin_top(48);
-    login_box.set_margin_bottom(48);
-    login_box.set_margin_start(48);
-    login_box.set_margin_end(48);
-
-    let status = StatusPage::new();
-    status.set_icon_name(Some("dialog-password-symbolic"));
-    status.set_title("VaultPass Native");
-    status.set_description(Some("Entrez votre mot de passe maître pour déverrouiller votre coffre"));
-    login_box.append(&status);
-
-    let pw_entry = PasswordEntry::new();
-    pw_entry.set_placeholder_text(Some("Mot de passe maître…"));
-    pw_entry.set_show_peek_icon(true);
-    pw_entry.set_width_chars(30);
-    login_box.append(&pw_entry);
-
-    let error_lbl = Label::new(None);
-    error_lbl.add_css_class("error");
-    error_lbl.set_visible(false);
-    login_box.append(&error_lbl);
-
-    let unlock_btn = Button::with_label("🔓 Déverrouiller");
-    unlock_btn.add_css_class("suggested-action");
-    unlock_btn.add_css_class("pill");
-    unlock_btn.set_halign(gtk4::Align::Center);
-    login_box.append(&unlock_btn);
-
-    let hint = Label::new(Some("💡 Premier lancement : tapez votre mot de passe maître pour créer un nouveau coffre."));
-    hint.add_css_class("caption");
-    hint.add_css_class("dim-label");
-    hint.set_wrap(true);
-    hint.set_justify(gtk4::Justification::Center);
-    login_box.append(&hint);
-
-    login_toolbar.set_content(Some(&login_box));
-
-    // La fenêtre affiche le ToolbarView login au départ
-    window.set_content(Some(&login_toolbar));
-    window.present();
+    let login = build_login_screen(window.clone());
+    window.set_content(Some(&login));
 
     let _autolock = setup_autolock(
         window.upcast_ref::<gtk4::Window>(),
         window.clone(),
     );
 
-    let window_u  = window.clone();
-    let pw_clone  = pw_entry.clone();
-    let err_clone = error_lbl.clone();
-
-    let do_unlock = Rc::new(move || {
-        let password = pw_clone.text().to_string();
-        if password.is_empty() {
-            err_clone.set_text("⚠️ Mot de passe vide.");
-            err_clone.set_visible(true);
-            return;
-        }
-        err_clone.set_visible(false);
-
-        let path  = db_path();
-        let store = match VaultStore::open(path.to_str().unwrap_or("/tmp/vault.db")) {
-            Ok(s)  => Rc::new(s),
-            Err(e) => {
-                err_clone.set_text(&format!("❌ Base de données : {e}"));
-                err_clone.set_visible(true);
-                return;
-            }
-        };
-
-        let salt_vec = match store.load_salt() {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                let s = kdf::generate_salt();
-                if let Err(e) = store.save_salt(&s) {
-                    err_clone.set_text(&format!("❌ Sauvegarde sel : {e}"));
-                    err_clone.set_visible(true);
-                    return;
-                }
-                s.to_vec()
-            }
-            Err(e) => {
-                err_clone.set_text(&format!("❌ Lecture sel : {e}"));
-                err_clone.set_visible(true);
-                return;
-            }
-        };
-
-        let salt_arr: [u8; 32] = match salt_vec.try_into() {
-            Ok(a)  => a,
-            Err(_) => {
-                err_clone.set_text("❌ Sel corrompu (longueur invalide).");
-                err_clone.set_visible(true);
-                return;
-            }
-        };
-
-        let master_key = match kdf::derive_master_key(password.as_bytes(), &salt_arr) {
-            Ok(k)  => k,
-            Err(e) => {
-                err_clone.set_text(&format!("❌ KDF : {e}"));
-                err_clone.set_visible(true);
-                return;
-            }
-        };
-        let key: Rc<Zeroizing<[u8; 32]>> = Rc::new(master_key.0);
-
-        match store.verify_or_init_sentinel(&key) {
-            Ok(true)  => {}
-            Ok(false) => {
-                err_clone.set_text("❌ Mot de passe incorrect.");
-                err_clone.set_visible(true);
-                return;
-            }
-            Err(e) => {
-                err_clone.set_text(&format!("❌ Vérification : {e}"));
-                err_clone.set_visible(true);
-                return;
-            }
-        }
-
-        glib::g_debug!(APP_ID, "Coffre déverrouillé");
-        let vault = build_vault(store, key, window_u.clone());
-        // On remplace directement le contenu de la fenêtre
-        window_u.set_content(Some(&vault));
-        window_u.set_default_size(1024, 680);
-        window_u.set_size_request(800, 500);
-    });
-
-    let du1 = do_unlock.clone();
-    unlock_btn.connect_clicked(move |_| du1());
-    let du2 = do_unlock.clone();
-    pw_entry.connect_activate(move |_| du2());
+    window.present();
 }
 
-/// Construit l'écran coffre. Retourne un NavigationSplitView
-/// enveloppé dans un ToolbarView (architecture Adwaita correcte).
 fn build_vault(
     store:     Rc<VaultStore>,
     key_bytes: Rc<Zeroizing<[u8; 32]>>,
@@ -250,19 +112,26 @@ fn build_vault(
     sidebar_box.append(&category_list);
     sidebar_box.append(&Separator::new(Orientation::Horizontal));
 
+    // ── Paramètres dans la sidebar ──
     let settings_list = ListBox::new();
     settings_list.add_css_class("navigation-sidebar");
     let sr = ListBoxRow::new();
     sr.set_child(Some(&Label::builder()
-        .label("⚙  Paramètres")
+        .label("⚙️  Paramètres")
         .halign(gtk4::Align::Start)
         .margin_start(12).margin_top(8).margin_bottom(8)
         .build()));
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
+    // Connexion du bouton Paramètres
+    let ws = window.clone();
+    settings_list.connect_row_activated(move |_, _| {
+        ui::dialogs::show_settings_dialog(ws.upcast_ref::<gtk4::Widget>());
+    });
+
     // ── CONTENU ──────────────────────────────────────────────────
-    let content_box    = GtkBox::new(Orientation::Vertical, 0);
+    let content_box = GtkBox::new(Orientation::Vertical, 0);
     content_box.set_vexpand(true);
     let content_header = HeaderBar::new();
 
@@ -306,7 +175,7 @@ fn build_vault(
     scroll.set_child(Some(&entries_list));
     content_box.append(&scroll);
 
-    // ── Filtre catégorie + recherche ─────────────────────────────
+    // ── Filtre ──────────────────────────────────────────────────
     let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
@@ -328,9 +197,7 @@ fn build_vault(
                     || entry.username.to_lowercase().contains(&q)
                     || entry.category.to_lowercase().contains(&q);
                 cat_ok && srch_ok
-            } else {
-                true
-            };
+            } else { true };
             row.set_visible(visible);
             i += 1;
         }
@@ -342,15 +209,10 @@ fn build_vault(
         let txt = sel
             .and_then(|r| r.child().and_downcast_ref::<Label>().map(|l| l.text().to_string()))
             .unwrap_or_default();
-        *cf1.borrow_mut() = if txt.contains("Perso") {
-            Some("Perso".to_string())
-        } else if txt.contains("Pro") {
-            Some("Pro".to_string())
-        } else if txt.contains("Finance") {
-            Some("Finance".to_string())
-        } else {
-            None
-        };
+        *cf1.borrow_mut() = if txt.contains("Perso") { Some("Perso".to_string()) }
+            else if txt.contains("Pro")     { Some("Pro".to_string()) }
+            else if txt.contains("Finance") { Some("Finance".to_string()) }
+            else { None };
         af1();
     });
 
@@ -364,8 +226,8 @@ fn build_vault(
     // ── Verrouiller ──────────────────────────────────────────────
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
-        let login_toolbar = build_login_screen(wl.clone());
-        wl.set_content(Some(&login_toolbar));
+        let login = build_login_screen(wl.clone());
+        wl.set_content(Some(&login));
         wl.set_default_size(480, 560);
         wl.set_size_request(0, 0);
         glib::g_debug!(APP_ID, "Coffre verrouillé manuellement");
@@ -392,7 +254,7 @@ fn build_vault(
         );
     });
 
-    // ── NavigationSplitView (remplit toute la fenêtre) ───────────
+    // ── NavigationSplitView ──────────────────────────────────────
     let split_view = NavigationSplitView::new();
     split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Catégories")));
     split_view.set_content(Some(&NavigationPage::new(&content_box, "Entrées")));
@@ -401,15 +263,12 @@ fn build_vault(
     split_view.set_vexpand(true);
     split_view.set_hexpand(true);
 
-    // ToolbarView sans HeaderBar supplémentaire — les HeaderBar sont
-    // déjà dans sidebar_box et content_box via NavigationSplitView
     let tv = ToolbarView::new();
     tv.set_content(Some(&split_view));
     tv.set_vexpand(true);
     tv
 }
 
-/// Construit l'écran login (utilisé au démarrage ET après verrouillage).
 fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     let login_toolbar = ToolbarView::new();
     let login_header  = HeaderBar::new();
@@ -640,8 +499,8 @@ pub fn build_entry_row(
 }
 
 fn setup_autolock(
-    window:   &gtk4::Window,
-    adw_win:  Rc<ApplicationWindow>,
+    window:  &gtk4::Window,
+    adw_win: Rc<ApplicationWindow>,
 ) -> Rc<ui::autolock::AutoLock> {
     let al = Rc::new(ui::autolock::AutoLock::new(ui::autolock::LockDelay::FiveMin));
 
@@ -660,7 +519,6 @@ fn setup_autolock(
 
     let w = adw_win.clone();
     al.start(move || {
-        // Vérifie si on est sur le vault (pas déjà sur login)
         if w.content().map_or(false, |c| c.is::<ToolbarView>() &&
             c.downcast_ref::<ToolbarView>()
              .and_then(|tv| tv.content())
@@ -676,3 +534,7 @@ fn setup_autolock(
 
     al
 }
+
+// Supprimer l'import inutilisé
+#[allow(dead_code)]
+fn _unused_stack() -> Stack { Stack::new() }

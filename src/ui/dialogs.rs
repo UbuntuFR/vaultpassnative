@@ -21,6 +21,9 @@ use uuid::Uuid;
 
 const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
 
+// ────────────────────────────────────────────────────────────────────
+// DIALOGUE NOUVELLE ENTRÉE
+// ────────────────────────────────────────────────────────────────────
 pub fn show_add_dialog(
     parent:     &impl IsA<gtk4::Widget>,
     store:      Rc<VaultStore>,
@@ -158,6 +161,9 @@ pub fn show_add_dialog(
     });
 }
 
+// ────────────────────────────────────────────────────────────────────
+// DIALOGUE CONFIRMATION SUPPRESSION
+// ────────────────────────────────────────────────────────────────────
 pub fn show_delete_confirm(
     parent:     &impl IsA<gtk4::Widget>,
     title:      &str,
@@ -175,14 +181,15 @@ pub fn show_delete_confirm(
     alert.set_response_appearance("delete", libadwaita::ResponseAppearance::Destructive);
 
     alert.connect_response(None, move |_, response| {
-        if response == "delete" {
-            on_confirm();
-        }
+        if response == "delete" { on_confirm(); }
     });
 
     alert.present(Some(parent));
 }
 
+// ────────────────────────────────────────────────────────────────────
+// DIALOGUE GÉNÉRATEUR
+// ────────────────────────────────────────────────────────────────────
 pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     let dialog = AdwDialog::builder()
         .title("🎲 Générateur de mots de passe")
@@ -202,8 +209,8 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     result_entry.add_css_class("monospace");
     result_entry.set_hexpand(true);
 
-    let len_row = GtkBox::new(Orientation::Horizontal, 8);
-    let len_lbl = Label::new(Some("Longueur : 20"));
+    let len_row   = GtkBox::new(Orientation::Horizontal, 8);
+    let len_lbl   = Label::new(Some("Longueur : 20"));
     len_lbl.set_hexpand(true);
     let len_scale = Scale::new(
         Orientation::Horizontal,
@@ -218,8 +225,7 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
         let r = GtkBox::new(Orientation::Horizontal, 8);
         let l = Label::builder().label(lbl).hexpand(true).build();
         let s = Switch::builder().active(on).build();
-        r.append(&l);
-        r.append(&s);
+        r.append(&l); r.append(&s);
         (r, s)
     }
     let (r_up, sw_up) = sw_row("Majuscules (A-Z)", true);
@@ -236,21 +242,17 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     let regen_btn = Button::with_label("🔄 Régénérer");
     regen_btn.add_css_class("suggested-action");
     regen_btn.set_hexpand(true);
-    let copy_btn = Button::with_label("📋 Copier");
+    let copy_btn  = Button::with_label("📋 Copier");
     btn_row.append(&regen_btn);
     btn_row.append(&copy_btn);
 
     for w in [
         result_entry.upcast_ref::<gtk4::Widget>(),
-        len_row.upcast_ref::<gtk4::Widget>(),
-        r_up.upcast_ref::<gtk4::Widget>(),
-        r_di.upcast_ref::<gtk4::Widget>(),
-        r_sy.upcast_ref::<gtk4::Widget>(),
-        strength_lbl.upcast_ref::<gtk4::Widget>(),
-        btn_row.upcast_ref::<gtk4::Widget>(),
-    ] {
-        vbox.append(w);
-    }
+        len_row.upcast_ref(),
+        r_up.upcast_ref(), r_di.upcast_ref(), r_sy.upcast_ref(),
+        strength_lbl.upcast_ref(),
+        btn_row.upcast_ref(),
+    ] { vbox.append(w); }
 
     let close_btn = Button::with_label("Fermer");
     close_btn.set_halign(gtk4::Align::Center);
@@ -261,12 +263,12 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     dialog.set_child(Some(&toolbar));
     dialog.present(Some(parent));
 
-    let re  = result_entry.clone();
-    let sl  = strength_lbl.clone();
-    let ls  = len_scale.clone();
-    let su  = sw_up.clone();
-    let sd  = sw_di.clone();
-    let ss  = sw_sy.clone();
+    let re = result_entry.clone();
+    let sl = strength_lbl.clone();
+    let ls = len_scale.clone();
+    let su = sw_up.clone();
+    let sd = sw_di.clone();
+    let ss = sw_sy.clone();
 
     let regenerate = Rc::new(move || {
         let pw = GeneratorConfig {
@@ -298,22 +300,152 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
         rg2();
     });
 
-    let rg3 = regenerate.clone();
-    sw_up.connect_state_set(move |_, _| { rg3(); false.into() });
-    let rg4 = regenerate.clone();
-    sw_di.connect_state_set(move |_, _| { rg4(); false.into() });
-    let rg5 = regenerate.clone();
-    sw_sy.connect_state_set(move |_, _| { rg5(); false.into() });
+    let rg3 = regenerate.clone(); sw_up.connect_state_set(move |_, _| { rg3(); false.into() });
+    let rg4 = regenerate.clone(); sw_di.connect_state_set(move |_, _| { rg4(); false.into() });
+    let rg5 = regenerate.clone(); sw_sy.connect_state_set(move |_, _| { rg5(); false.into() });
 
     let re2 = result_entry.clone();
     copy_btn.connect_clicked(move |b| {
         let pw = re2.text().to_string();
         if !pw.is_empty() {
-            // .display() disponible via use gdk4::prelude::DisplayExt en tête
             b.display().clipboard().set_text(&pw);
             gtk4::glib::g_debug!(APP_ID, "Mot de passe copié depuis le générateur");
         }
     });
+
+    let dlg = dialog.clone();
+    close_btn.connect_clicked(move |_| { dlg.close(); });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// DIALOGUE PARAMÈTRES
+// ────────────────────────────────────────────────────────────────────
+pub fn show_settings_dialog(parent: &impl IsA<gtk4::Widget>) {
+    let dialog = AdwDialog::builder()
+        .title("⚙️ Paramètres")
+        .content_width(420)
+        .build();
+
+    let toolbar = ToolbarView::new();
+    let header  = libadwaita::HeaderBar::new();
+    toolbar.add_top_bar(&header);
+
+    let vbox = GtkBox::new(Orientation::Vertical, 16);
+    vbox.set_margin_top(16);   vbox.set_margin_bottom(16);
+    vbox.set_margin_start(16); vbox.set_margin_end(16);
+
+    // ── Section Sécurité ──
+    let sec_lbl = Label::builder()
+        .label("🔒 Sécurité")
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build();
+    vbox.append(&sec_lbl);
+
+    let sec_list = gtk4::ListBox::new();
+    sec_list.add_css_class("boxed-list");
+
+    // Délai auto-verrouillage
+    let lock_row = GtkBox::new(Orientation::Horizontal, 8);
+    lock_row.set_margin_top(10); lock_row.set_margin_bottom(10);
+    lock_row.set_margin_start(12); lock_row.set_margin_end(12);
+    let lock_lbl = Label::builder()
+        .label("Auto-verrouillage")
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+    let lock_val = Label::builder()
+        .label("5 minutes")
+        .css_classes(["dim-label", "caption"])
+        .build();
+    lock_row.append(&lock_lbl);
+    lock_row.append(&lock_val);
+    let lock_row_wrap = gtk4::ListBoxRow::new();
+    lock_row_wrap.set_child(Some(&lock_row));
+    lock_row_wrap.set_activatable(false);
+    sec_list.append(&lock_row_wrap);
+
+    // Chiffrement
+    let enc_row = GtkBox::new(Orientation::Horizontal, 8);
+    enc_row.set_margin_top(10); enc_row.set_margin_bottom(10);
+    enc_row.set_margin_start(12); enc_row.set_margin_end(12);
+    let enc_lbl = Label::builder()
+        .label("Chiffrement")
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+    let enc_val = Label::builder()
+        .label("AES-256-GCM")
+        .css_classes(["dim-label", "caption"])
+        .build();
+    enc_row.append(&enc_lbl);
+    enc_row.append(&enc_val);
+    let enc_row_wrap = gtk4::ListBoxRow::new();
+    enc_row_wrap.set_child(Some(&enc_row));
+    enc_row_wrap.set_activatable(false);
+    sec_list.append(&enc_row_wrap);
+
+    // KDF
+    let kdf_row = GtkBox::new(Orientation::Horizontal, 8);
+    kdf_row.set_margin_top(10); kdf_row.set_margin_bottom(10);
+    kdf_row.set_margin_start(12); kdf_row.set_margin_end(12);
+    let kdf_lbl = Label::builder()
+        .label("Dérivation de clé")
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+    let kdf_val = Label::builder()
+        .label("Argon2id — OWASP 2024")
+        .css_classes(["dim-label", "caption"])
+        .build();
+    kdf_row.append(&kdf_lbl);
+    kdf_row.append(&kdf_val);
+    let kdf_row_wrap = gtk4::ListBoxRow::new();
+    kdf_row_wrap.set_child(Some(&kdf_row));
+    kdf_row_wrap.set_activatable(false);
+    sec_list.append(&kdf_row_wrap);
+
+    vbox.append(&sec_list);
+
+    // ── Section À propos ──
+    let about_lbl = Label::builder()
+        .label("ℹ️ À propos")
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .margin_top(8)
+        .build();
+    vbox.append(&about_lbl);
+
+    let about_list = gtk4::ListBox::new();
+    about_list.add_css_class("boxed-list");
+
+    for (k, v) in &[
+        ("Application",  "VaultPass Native"),
+        ("Version",       "0.1.0"),
+        ("Plateforme",    "Linux — GTK4 + Libadwaita"),
+        ("Développeur",   "UbuntuFR"),
+    ] {
+        let r = GtkBox::new(Orientation::Horizontal, 8);
+        r.set_margin_top(10); r.set_margin_bottom(10);
+        r.set_margin_start(12); r.set_margin_end(12);
+        r.append(&Label::builder().label(*k).hexpand(true).halign(gtk4::Align::Start).build());
+        r.append(&Label::builder().label(*v).css_classes(["dim-label", "caption"]).build());
+        let rw = gtk4::ListBoxRow::new();
+        rw.set_child(Some(&r));
+        rw.set_activatable(false);
+        about_list.append(&rw);
+    }
+    vbox.append(&about_list);
+
+    let close_btn = Button::with_label("Fermer");
+    close_btn.add_css_class("pill");
+    close_btn.set_halign(gtk4::Align::Center);
+    close_btn.set_margin_top(8);
+    vbox.append(&close_btn);
+
+    toolbar.set_content(Some(&vbox));
+    dialog.set_child(Some(&toolbar));
+    dialog.present(Some(parent));
 
     let dlg = dialog.clone();
     close_btn.connect_clicked(move |_| { dlg.close(); });
