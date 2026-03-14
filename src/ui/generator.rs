@@ -77,6 +77,7 @@ impl GeneratorConfig {
     /// Fisher-Yates shuffle via OsRng.
     fn shuffle(v: &mut [u8]) {
         let n = v.len();
+        // FIX: Use mut n instead of immutable n for iteration
         for i in (1..n).rev() {
             let j = Self::rand_index(i + 1);
             v.swap(i, j);
