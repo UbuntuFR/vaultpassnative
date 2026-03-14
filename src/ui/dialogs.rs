@@ -17,6 +17,8 @@ use crate::crypto::cipher;
 use crate::database::{store::VaultStore, models::{VaultEntry, EntryId}};
 use crate::ui::generator::GeneratorConfig;
 use crate::ui::vault_context::VaultContext;
+use crate::ui::prefs::Prefs;
+use crate::ui::theme::Theme;
 use crate::now_unix;
 
 const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
@@ -459,8 +461,9 @@ pub fn show_settings_dialog(
     store:  Rc<VaultStore>,
     key:    Rc<Zeroizing<[u8; 32]>>,
     window: Rc<libadwaita::ApplicationWindow>,
+    prefs:  Rc<std::cell::RefCell<Prefs>>,
 ) {
-    let (dialog, toolbar) = make_toolbar_dialog("⚙️ Paramètres", 420);
+    let (dialog, toolbar) = make_toolbar_dialog("⚙️ Paramètres", 460);
 
     let vbox = GtkBox::new(Orientation::Vertical, 16);
     vbox.set_margin_top(16);   vbox.set_margin_bottom(16);
@@ -552,6 +555,74 @@ pub fn show_settings_dialog(
             }
         }
     });
+
+    vbox.append(&Separator::new(Orientation::Horizontal));
+
+    // ── Thème ──
+    vbox.append(&Label::builder()
+        .label("🎨 Apparence")
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build());
+
+    let theme_list = make_fields_box();
+    let current_theme_id = prefs.borrow().theme.clone();
+    for th in Theme::all() {
+        let rw  = gtk4::ListBoxRow::new();
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        row.set_margin_top(10); row.set_margin_bottom(10);
+        row.set_margin_start(12); row.set_margin_end(12);
+        row.append(&Label::builder().label(th.label()).hexpand(true).halign(gtk4::Align::Start).build());
+        if th.id() == current_theme_id {
+            row.append(&Label::builder().label("✓").css_classes(["accent"]).build());
+        }
+        rw.set_child(Some(&row));
+        theme_list.append(&rw);
+    }
+    let prefs_th = prefs.clone();
+    theme_list.connect_row_activated(move |_, row| {
+        let themes = Theme::all();
+        if let Some(th) = themes.get(row.index() as usize) {
+            crate::ui::theme::apply(th);
+            prefs_th.borrow_mut().theme = th.id().to_string();
+            prefs_th.borrow().save();
+        }
+    });
+    vbox.append(&theme_list);
+
+    vbox.append(&Separator::new(Orientation::Horizontal));
+
+    // ── Auto-verrouillage configurable ──
+    vbox.append(&Label::builder()
+        .label("⏱️ Auto-verrouillage")
+        .halign(gtk4::Align::Start)
+        .css_classes(["heading"])
+        .build());
+
+    use crate::ui::autolock::LockDelay;
+    let lock_list = make_fields_box();
+    let current_delay = prefs.borrow().lock_delay_secs;
+    for delay in LockDelay::all() {
+        let rw  = gtk4::ListBoxRow::new();
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        row.set_margin_top(10); row.set_margin_bottom(10);
+        row.set_margin_start(12); row.set_margin_end(12);
+        row.append(&Label::builder().label(delay.label()).hexpand(true).halign(gtk4::Align::Start).build());
+        if *delay as u64 == current_delay {
+            row.append(&Label::builder().label("✓").css_classes(["accent"]).build());
+        }
+        rw.set_child(Some(&row));
+        lock_list.append(&rw);
+    }
+    let prefs_lk = prefs.clone();
+    lock_list.connect_row_activated(move |_, row| {
+        let delays = LockDelay::all();
+        if let Some(d) = delays.get(row.index() as usize) {
+            prefs_lk.borrow_mut().lock_delay_secs = *d as u64;
+            prefs_lk.borrow().save();
+        }
+    });
+    vbox.append(&lock_list);
 
     vbox.append(&Separator::new(Orientation::Horizontal));
 

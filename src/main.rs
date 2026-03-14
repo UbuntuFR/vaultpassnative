@@ -18,6 +18,8 @@ use gtk4::{
 use crypto::{kdf, cipher};
 use database::{store::{VaultStore, StoreError}, models::VaultEntry};
 use ui::vault_context::VaultContext;
+use ui::prefs::Prefs;
+use ui::theme;
 use zeroize::Zeroizing;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::cell::RefCell;
@@ -49,6 +51,9 @@ fn main() {
 }
 
 fn build_ui(app: &Application) {
+    let prefs = Prefs::load();
+    theme::apply(&theme::Theme::from_id(&prefs.theme));
+
     let window = Rc::new(ApplicationWindow::builder()
         .application(app)
         .title("VaultPass")
@@ -182,6 +187,7 @@ fn build_vault(
     store:  Rc<VaultStore>,
     key:    Rc<Zeroizing<[u8; 32]>>,
     window: Rc<ApplicationWindow>,
+    prefs:  Rc<RefCell<Prefs>>,
 ) -> ToolbarView {
     let db_entries = Rc::new(RefCell::new(store.list_entries().unwrap_or_default()));
 
@@ -206,7 +212,7 @@ fn build_vault(
     let category_list = ListBox::new();
     category_list.set_selection_mode(SelectionMode::Single);
     category_list.add_css_class("navigation-sidebar");
-    for cat in &["\u{1F510}  Tous", "\u{1F464}  Perso", "\u{1F4BC}  Pro", "\u{1F4B0}  Finance"] {
+    for cat in &["🔐  Tous", "👤  Perso", "💼  Pro", "💰  Finance"] {
         let row = ListBoxRow::new();
         row.set_child(Some(&Label::builder()
             .label(*cat).halign(gtk4::Align::Start)
@@ -215,6 +221,17 @@ fn build_vault(
     }
     category_list.select_row(category_list.row_at_index(0).as_ref());
     sidebar_box.append(&category_list);
+    sidebar_box.append(&Separator::new(Orientation::Horizontal));
+
+    let notes_list = gtk4::ListBox::new();
+    notes_list.add_css_class("navigation-sidebar");
+    let notes_row = ListBoxRow::new();
+    notes_row.set_child(Some(&Label::builder()
+        .label("📝  Notes")
+        .halign(gtk4::Align::Start)
+        .margin_start(12).margin_top(8).margin_bottom(8).build()));
+    notes_list.append(&notes_row);
+    sidebar_box.append(&notes_list);
     sidebar_box.append(&Separator::new(Orientation::Horizontal));
 
     let settings_list = ListBox::new();
@@ -230,14 +247,30 @@ fn build_vault(
     let store_s = store.clone();
     let key_s   = key.clone();
     let ws      = window.clone();
+    let prefs_s = prefs.clone();
     settings_list.connect_row_activated(move |_, _| {
         ui::dialogs::show_settings_dialog(
             ws.upcast_ref::<gtk4::Widget>(),
             store_s.clone(), key_s.clone(), ws.clone(),
+            prefs_s.clone(),
         );
     });
 
     let content_box    = GtkBox::new(Orientation::Vertical, 0);
+
+    // ── Notes : connecté ici car content_box est maintenant en scope ──
+    let store_n = store.clone();
+    let key_n   = key.clone();
+    notes_list.connect_row_activated({
+        let content_box = content_box.clone();
+        move |_, _| {
+            while let Some(child) = content_box.first_child() {
+                content_box.remove(&child);
+            }
+            let np = ui::notepad::build_notepad(store_n.clone(), key_n.clone());
+            content_box.append(&np);
+        }
+    });
     content_box.set_vexpand(true);
     let content_header = HeaderBar::new();
 
@@ -304,7 +337,8 @@ fn build_vault(
     content_box.append(&toast_overlay);
 
     // Tri A<->Z
-    let sort_asc = Rc::new(RefCell::new(true));
+    let initial_sort = prefs.borrow().sort_ascending;
+    let sort_asc = Rc::new(RefCell::new(initial_sort));
     let ctx_sort = ctx.clone();
     sort_btn.connect_clicked(move |_| {
         let mut asc = sort_asc.borrow_mut();
@@ -315,6 +349,8 @@ fn build_vault(
             if ascending { a.title.to_lowercase().cmp(&b.title.to_lowercase()) }
             else         { b.title.to_lowercase().cmp(&a.title.to_lowercase()) }
         });
+        prefs.borrow_mut().sort_ascending = ascending;
+        prefs.borrow().save();
         while let Some(child) = ctx_sort.entries_list.first_child() {
             ctx_sort.entries_list.remove(&child);
         }
@@ -511,7 +547,7 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
             Err(e)    => { err.set_text(&format!("❌ Vérif : {e}")); err.set_visible(true); return; }
         }
 
-        let vault = build_vault(store, key, win.clone());
+        let vault = build_vault(store, key, win.clone(), Rc::new(std::cell::RefCell::new(Prefs::load())));
         win.set_content(Some(&vault));
         win.set_default_size(1024, 680);
         win.set_size_request(800, 500);
