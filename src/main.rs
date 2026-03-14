@@ -17,17 +17,13 @@ use gtk4::{
 
 use crypto::{kdf, cipher};
 use database::{store::VaultStore, models::VaultEntry as DbEntry};
-use ui::generator::GeneratorConfig;
 use zeroize::Zeroizing;
-use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
 
-/// Retourne le chemin vers la base de données dans XDG_DATA_HOME
-/// (~/.local/share/vaultpass/vault.db dans le sandbox Flatpak).
 fn db_path() -> std::path::PathBuf {
     let mut p = glib::user_data_dir();
     p.push("vaultpass");
@@ -56,7 +52,6 @@ fn build_ui(app: &Application) {
     stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
     stack.set_transition_duration(300);
 
-    // ── PAGE LOGIN ────────────────────────────────────────────────
     let login_box = GtkBox::new(Orientation::Vertical, 24);
     login_box.set_valign(gtk4::Align::Center);
     login_box.set_halign(gtk4::Align::Center);
@@ -114,7 +109,7 @@ fn build_ui(app: &Application) {
         .build());
 
     let _autolock = setup_autolock(
-        window.upcast_ref(),
+        window.upcast_ref::<gtk4::Window>(),
         stack.clone(),
         ui::autolock::LockDelay::FiveMin,
     );
@@ -134,8 +129,7 @@ fn build_ui(app: &Application) {
         }
         err_clone.set_visible(false);
 
-        // Ouvre ou crée la base
-        let path = db_path();
+        let path  = db_path();
         let store = match VaultStore::open(path.to_str().unwrap_or("/tmp/vault.db")) {
             Ok(s)  => Rc::new(s),
             Err(e) => {
@@ -145,7 +139,6 @@ fn build_ui(app: &Application) {
             }
         };
 
-        // Récupère ou génère le sel
         let salt_vec = match store.load_salt() {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -164,7 +157,6 @@ fn build_ui(app: &Application) {
             }
         };
 
-        // Conversion sel : erreur explicite, jamais de fallback nul
         let salt_arr: [u8; 32] = match salt_vec.try_into() {
             Ok(a)  => a,
             Err(_) => {
@@ -174,7 +166,6 @@ fn build_ui(app: &Application) {
             }
         };
 
-        // Dérive la clé maître
         let master_key = match kdf::derive_master_key(password.as_bytes(), &salt_arr) {
             Ok(k)  => k,
             Err(e) => {
@@ -184,7 +175,6 @@ fn build_ui(app: &Application) {
             }
         };
 
-        // Stocke la clé dans un Zeroizing pour effacement automatique
         let raw: [u8; 32] = match (*master_key.0).clone().try_into() {
             Ok(a)  => a,
             Err(_) => {
@@ -195,9 +185,8 @@ fn build_ui(app: &Application) {
         };
         let key: Rc<Zeroizing<[u8; 32]>> = Rc::new(Zeroizing::new(raw));
 
-        // Vérifie le mot de passe maître via la sentinelle
         match store.verify_or_init_sentinel(&key) {
-            Ok(true) => {}
+            Ok(true)  => {}
             Ok(false) => {
                 err_clone.set_text("❌ Mot de passe incorrect.");
                 err_clone.set_visible(true);
@@ -230,7 +219,6 @@ fn build_vault(
     stack:     Rc<Stack>,
     window:    Rc<ApplicationWindow>,
 ) -> GtkBox {
-    // Modèle en mémoire : liste des entrées avec un id stable par widget
     let db_entries: Rc<RefCell<Vec<DbEntry>>> = Rc::new(RefCell::new(
         store.list_entries().unwrap_or_default()
     ));
@@ -317,7 +305,6 @@ fn build_vault(
     entries_list.set_margin_start(16);
     entries_list.set_margin_end(16);
 
-    // Construction des lignes — l'id de l'entrée est stocké dans le widget
     for entry in db_entries.borrow().iter() {
         let row = build_entry_row(
             entry, &key_bytes, &store, &db_entries, &entries_list, &banner,
@@ -325,23 +312,19 @@ fn build_vault(
         entries_list.append(&row);
     }
 
-    // ── Filtre catégorie ─────────────────────────────────────────
-    // On filtre via la fonction de filtre GTK pour éviter la désynchronisation
-    // entre indices Vec et indices ListBox.
-    let db_filter = db_entries.clone();
-    let cat_filter: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    let search_filter: Rc<RefCell<String>>      = Rc::new(RefCell::new(String::new()));
+    // ── Filtre catégorie + recherche (logique centralisée) ──
+    let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
     let el_c   = entries_list.clone();
     let cat_f  = cat_filter.clone();
     let srch_f = search_filter.clone();
-    let db_c   = db_filter.clone();
+    let db_c   = db_entries.clone();
 
-    // Fonction de filtre centralisée
     let apply_filter = Rc::new(move || {
-        let cat  = cat_f.borrow().clone();
-        let q    = srch_f.borrow().to_lowercase();
-        let db   = db_c.borrow();
+        let cat   = cat_f.borrow().clone();
+        let q     = srch_f.borrow().to_lowercase();
+        let db    = db_c.borrow();
         let mut i = 0i32;
         while let Some(row) = el_c.row_at_index(i) {
             let visible = if let Some(entry) = db.get(i as usize) {
@@ -384,34 +367,33 @@ fn build_vault(
         af2();
     });
 
-    // ── Verrouiller ──────────────────────────────────────────────
+    // ── Verrouiller ──
     let st = stack.clone();
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
-        if let Some(v) = st.child_by_name("vault") {
-            st.remove(&v);
-        }
+        if let Some(v) = st.child_by_name("vault") { st.remove(&v); }
         st.set_visible_child_name("login");
         wl.set_default_size(480, 560);
         glib::g_debug!(APP_ID, "Coffre verrouillé manuellement");
     });
 
-    // ── Générateur ───────────────────────────────────────────────
+    // ── Générateur ──
     let wg = window.clone();
     gen_btn.connect_clicked(move |_| {
-        ui::dialogs::show_generator_dialog(wg.upcast_ref());
+        ui::dialogs::show_generator_dialog(wg.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── Nouvelle entrée ──────────────────────────────────────────
-    let st2 = store.clone();
-    let ka  = key_bytes.clone();
+    // ── Nouvelle entrée ──
+    let st2  = store.clone();
+    let ka   = key_bytes.clone();
     let el_a = entries_list.clone();
     let db_a = db_entries.clone();
     let bn_a = banner.clone();
     let wa   = window.clone();
     add_btn.connect_clicked(move |_| {
         ui::dialogs::show_add_dialog(
-            wa.upcast_ref(), st2.clone(), ka.clone(),
+            wa.upcast_ref::<gtk4::Widget>(),
+            st2.clone(), ka.clone(),
             el_a.clone(), db_a.clone(), bn_a.clone(),
         );
     });
@@ -431,17 +413,17 @@ fn build_vault(
 }
 
 pub fn build_entry_row(
-    entry:       &DbEntry,
-    key:         &Rc<Zeroizing<[u8; 32]>>,
-    store:       &Rc<VaultStore>,
-    db_entries:  &Rc<RefCell<Vec<DbEntry>>>,
+    entry:        &DbEntry,
+    key:          &Rc<Zeroizing<[u8; 32]>>,
+    store:        &Rc<VaultStore>,
+    db_entries:   &Rc<RefCell<Vec<DbEntry>>>,
     entries_list: &ListBox,
-    banner:      &Banner,
+    banner:       &Banner,
 ) -> ListBoxRow {
     let row     = ListBoxRow::new();
     let row_box = GtkBox::new(Orientation::Horizontal, 12);
-    row_box.set_margin_top(10);    row_box.set_margin_bottom(10);
-    row_box.set_margin_start(8);   row_box.set_margin_end(8);
+    row_box.set_margin_top(10);  row_box.set_margin_bottom(10);
+    row_box.set_margin_start(8); row_box.set_margin_end(8);
 
     row_box.append(&Label::new(Some("🔑")));
 
@@ -467,11 +449,11 @@ pub fn build_entry_row(
     let copy_btn = Button::from_icon_name("edit-copy-symbolic");
     copy_btn.add_css_class("flat");
     copy_btn.set_tooltip_text(Some("Copier le mot de passe"));
-    let enc  = entry.password_encrypted.clone();
-    let kc   = Rc::clone(key);
-    let tc2  = entry.title.clone();
+    let enc = entry.password_encrypted.clone();
+    let kc  = Rc::clone(key);
+    let tc2 = entry.title.clone();
     copy_btn.connect_clicked(move |b| {
-        match cipher::decrypt(&kc, &enc) {
+        match cipher::decrypt(&**kc, &enc) {
             Ok(plain) => {
                 let pw = String::from_utf8_lossy(&plain).to_string();
                 if let Some(d) = b.display().downcast_ref::<gdk4::Display>() {
@@ -490,48 +472,42 @@ pub fn build_entry_row(
     del_btn.add_css_class("destructive-action");
     del_btn.set_tooltip_text(Some("Supprimer"));
 
-    let eid  = entry.id.clone();
+    let eid    = entry.id.clone();
     let etitle = entry.title.clone();
-    let sd   = Rc::clone(store);
-    let dd   = Rc::clone(db_entries);
-    let ld   = entries_list.clone();
-    let bd   = banner.clone();
-    let rw   = row.clone();
-    let pw_u = window_upcast_hack();
-    let _ = pw_u; // utilisé dans show_delete_confirm
+    let sd     = Rc::clone(store);
+    let dd     = Rc::clone(db_entries);
+    let ld     = entries_list.clone();
+    let bd     = banner.clone();
+    let rw     = row.clone();
 
     del_btn.connect_clicked(move |btn| {
-        // Recherche le parent Window pour le dialogue
-        let parent_widget = btn.upcast_ref::<gtk4::Widget>();
         let sd2  = sd.clone();
         let dd2  = dd.clone();
         let ld2  = ld.clone();
         let bd2  = bd.clone();
         let rw2  = rw.clone();
         let eid2 = eid.clone();
-        ui::dialogs::show_delete_confirm(parent_widget, &etitle, move || {
-            if sd2.delete_entry(&eid2).is_ok() {
-                ld2.remove(&rw2);
-                dd2.borrow_mut().retain(|e| e.id != eid2);
-                bd2.set_title(&format!(
-                    "🔐 {} entrées — AES-256-GCM + Argon2id",
-                    dd2.borrow().len()
-                ));
-                glib::g_debug!(APP_ID, "Entrée supprimée : {}", eid2);
-            }
-        });
+        ui::dialogs::show_delete_confirm(
+            btn.upcast_ref::<gtk4::Widget>(),
+            &etitle,
+            move || {
+                if sd2.delete_entry(&eid2).is_ok() {
+                    ld2.remove(&rw2);
+                    dd2.borrow_mut().retain(|e| e.id != eid2);
+                    bd2.set_title(&format!(
+                        "🔐 {} entrées — AES-256-GCM + Argon2id",
+                        dd2.borrow().len()
+                    ));
+                    glib::g_debug!(APP_ID, "Entrée supprimée");
+                }
+            },
+        );
     });
     row_box.append(&del_btn);
     row.set_child(Some(&row_box));
     row
 }
 
-/// Petite fonction pour éviter un appel d'upcast en dehors d'un contexte widget.
-/// Non utilisée directement — voir usage dans del_btn::connect_clicked.
-#[allow(dead_code)]
-fn window_upcast_hack() -> () {}
-
-// ── Auto-lock ─────────────────────────────────────────────────────────────────
 fn setup_autolock(
     window: &gtk4::Window,
     stack:  Rc<gtk4::Stack>,
@@ -555,9 +531,7 @@ fn setup_autolock(
     let st = stack.clone();
     al.start(move || {
         if st.visible_child_name().as_deref() == Some("vault") {
-            if let Some(v) = st.child_by_name("vault") {
-                st.remove(&v);
-            }
+            if let Some(v) = st.child_by_name("vault") { st.remove(&v); }
             st.set_visible_child_name("login");
             glib::g_debug!(APP_ID, "Auto-verrouillage déclenché");
         }
