@@ -13,7 +13,7 @@ pub enum StoreError {
     Cipher(#[from] CipherError),
     #[error("Erreur KDF : {0}")]
     Kdf(String),
-    #[error("Entrée introuvable : {0}")]
+    #[error("Entr\u00e9e introuvable : {0}")]
     NotFound(String),
 }
 
@@ -52,7 +52,7 @@ impl VaultStore {
                 username           TEXT    NOT NULL,
                 password_encrypted BLOB    NOT NULL,
                 url                TEXT,
-                category           TEXT    NOT NULL DEFAULT 'Général',
+                category           TEXT    NOT NULL DEFAULT 'G\u00e9n\u00e9ral',
                 notes_encrypted    BLOB,
                 created_at         INTEGER NOT NULL,
                 updated_at         INTEGER NOT NULL
@@ -223,7 +223,7 @@ mod tests {
             id:                 EntryId::new(),
             title:              "GitHub".to_string(),
             username:           "user@example.com".to_string(),
-            password_encrypted: cipher::encrypt(key.as_ref(), b"secret123").unwrap(),
+            password_encrypted: cipher::encrypt(&**key, b"secret123").unwrap(),
             url:                Some("https://github.com".to_string()),
             category:           "Pro".to_string(),
             notes_encrypted:    None,
@@ -320,7 +320,7 @@ mod tests {
         let new_key  = kdf::derive_master_key(b"new_pass", &new_salt).unwrap().0;
         assert!(store.verify_or_init_sentinel(&new_key).unwrap());
         let entries  = store.list_entries().unwrap();
-        let plain    = cipher::decrypt(new_key.as_ref(), &entries[0].password_encrypted).unwrap();
+        let plain    = cipher::decrypt(&*new_key, &entries[0].password_encrypted).unwrap();
         assert_eq!(&*plain, b"secret123");
     }
 
@@ -329,10 +329,10 @@ mod tests {
         let store = VaultStore::open_in_memory().unwrap();
         let key   = make_key();
         let mut e = make_entry(&key);
-        e.notes_encrypted = Some(cipher::encrypt(key.as_ref(), b"notes secretes").unwrap());
+        e.notes_encrypted = Some(cipher::encrypt(&**key, b"notes secretes").unwrap());
         store.insert_entry(&e).unwrap();
         let list  = store.list_entries().unwrap();
-        let dec   = cipher::decrypt(key.as_ref(), list[0].notes_encrypted.as_ref().unwrap()).unwrap();
+        let dec   = cipher::decrypt(&**key, list[0].notes_encrypted.as_ref().unwrap()).unwrap();
         assert_eq!(&*dec, b"notes secretes");
     }
 }
