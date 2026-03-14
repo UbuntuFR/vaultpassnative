@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.vaultpass.VaultPass</id>
+  <name>VaultPass</name>
+  <summary>Gestionnaire de mots de passe sécurisé pour GNOME</summary>
+  <summary xml:lang="en">Secure password manager for GNOME</summary>
+  
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  
+  <description>
+    <p>
+      VaultPass est un gestionnaire de mots de passe sécurisé et open source,
+      conçu pour l'environnement de bureau GNOME. Il offre une sécurité de niveau
+      militaire avec chiffrement AES-256-GCM et dérivation de clé Argon2id.
+    </p>
+    <p xml:lang="en">
+      VaultPass is a secure, open source password manager designed for the
+      GNOME desktop environment. It offers military-grade security with
+      AES-256-GCM encryption and Argon2id key derivation.
+    </p>
+    <p>Fonctionnalités principales:</p>
+    <ul>
+      <li>Chiffrement AES-256-GCM (norme NIST)</li>
+      <li>Dérivation de clé Argon2id (recommandé OWASP)</li>
+      <li>Générateur de mots de passe sécurisé</li>
+      <li>Verrouillage automatique configurable</li>
+      <li>Import depuis Bitwarden et CSV</li>
+      <li>Notes chiffrées intégrées</li>
+      <li>Thèmes visuels (Nord, Catppuccin, Everforest)</li>
+      <li>Interface GTK4 moderne conforme GNOME HIG</li>
+    </ul>
+  </description>
+  
+  <launchable type="desktop-id">com.vaultpass.VaultPass.desktop</launchable>
+  
+  <url type="homepage">https://github.com/UbuntuFR/vaultpassnative</url>
+  <url type="bugtracker">https://github.com/UbuntuFR/vaultpassnative/issues</url>
+  
+  <developer_name>UbuntuFR</developer_name>
+  
+  <content_rating type="oars-1.1" />
+  
+  <releases>
+    <release version="0.2.0" date="2026-03-14">
+      <description>
+        <p>Version avec corrections de bugs et améliorations:</p>
+        <ul>
+          <li>Correction de 6 bugs critiques</li>
+          <li>Amélioration de la stabilité</li>
+          <li>Support Flatpak ajouté</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+  
+  <screenshots>
+    <screenshot type="default">
+      <caption>Interface principale de VaultPass</caption>
+      <caption xml:lang="en">VaultPass main interface</caption>
+    </screenshot>
+  </screenshots>
+  
+  <categories>
+    <category>Utility</category>
+    <category>Security</category>
+  </categories>
+  
+  <keywords>
+    <keyword>mot de passe</keyword>
+    <keyword>password</keyword>
+    <keyword>vault</keyword>
+    <keyword>security</keyword>
+    <keyword>chiffrement</keyword>
+    <keyword>encryption</keyword>
+    <keyword xml:lang="en">password</keyword>
+    <keyword xml:lang="en">vault</keyword>
+    <keyword xml:lang="en">security</keyword>
+    <keyword xml:lang="en">encryption</keyword>
+  </keywords>
+  
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+</component>
