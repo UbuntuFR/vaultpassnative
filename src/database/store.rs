@@ -93,7 +93,15 @@ impl VaultStore {
         };
 
         match existing {
-            None | Some(ref _empty) if existing.as_ref().map_or(true, |b| b.is_empty()) => {
+            None => {
+                let encrypted = encrypt(&**key, SENTINEL_PLAINTEXT)?;
+                self.conn.execute(
+                    "UPDATE vault_meta SET sentinel = ?1 WHERE id = 1",
+                    params![encrypted],
+                )?;
+                Ok(true)
+            }
+            Some(ref blob) if blob.is_empty() => {
                 let encrypted = encrypt(&**key, SENTINEL_PLAINTEXT)?;
                 self.conn.execute(
                     "UPDATE vault_meta SET sentinel = ?1 WHERE id = 1",
@@ -177,22 +185,19 @@ impl VaultStore {
         Ok(())
     }
 
-    /// Re-chiffre toutes les entrées avec un nouveau mot de passe maître.
     pub fn change_master_password(
         &self,
         old_key: &Zeroizing<[u8; 32]>,
         new_password: &[u8],
     ) -> Result<(), StoreError> {
-        // Générer nouveau sel + dériver nouvelle clé
-        let new_salt = kdf::generate_salt();
+        let new_salt   = kdf::generate_salt();
         let new_master = kdf::derive_master_key(new_password, &new_salt)
             .map_err(|e| StoreError::Kdf(e.to_string()))?;
-        let new_key = new_master.0;
+        let new_key    = new_master.0;
 
-        // Re-chiffrer toutes les entrées
         let entries = self.list_entries()?;
         for entry in &entries {
-            let plain_pw = decrypt(&**old_key, &entry.password_encrypted)
+            let plain_pw   = decrypt(&**old_key, &entry.password_encrypted)
                 .map_err(StoreError::Cipher)?;
             let new_pw_enc = encrypt(&*new_key, &plain_pw)?;
 
@@ -210,7 +215,6 @@ impl VaultStore {
             )?;
         }
 
-        // Nouveau sel + nouvelle sentinelle
         let new_sentinel = encrypt(&*new_key, SENTINEL_PLAINTEXT)?;
         self.conn.execute(
             "UPDATE vault_meta SET salt = ?1, sentinel = ?2 WHERE id = 1",

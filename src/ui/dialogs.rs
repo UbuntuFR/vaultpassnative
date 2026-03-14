@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use zeroize::Zeroizing;
 
-use crate::crypto::{cipher, kdf};
+use crate::crypto::cipher;
 use crate::database::{store::VaultStore, models::VaultEntry as DbEntry};
 use crate::ui::generator::GeneratorConfig;
 use crate::now_unix;
@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
 
-// ── Helpers ───────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────
 fn make_fields_box() -> gtk4::ListBox {
     let lb = gtk4::ListBox::new();
     lb.add_css_class("boxed-list");
@@ -40,16 +40,27 @@ fn make_toolbar_dialog(title: &str, width: i32) -> (AdwDialog, ToolbarView) {
     (dialog, toolbar)
 }
 
+fn strength_text(pw: &str) -> String {
+    let (bars, label) = match GeneratorConfig::strength_score(pw) {
+        0 => ("██░░░░░░░░", "Très faible 🔴"),
+        1 => ("████░░░░░░", "Faible 🟠"),
+        2 => ("██████░░░░", "Moyen 🟡"),
+        3 => ("████████░░", "Fort 🟢"),
+        _ => ("██████████", "Excellent ✅"),
+    };
+    format!("Force : {} {}", bars, label)
+}
+
 // ── DIALOGUE NOUVELLE ENTRÉE ──────────────────────────────────────────
 pub fn show_add_dialog(
-    parent:       &impl IsA<gtk4::Widget>,
-    store:        Rc<VaultStore>,
-    key:          Rc<Zeroizing<[u8; 32]>>,
-    list:         gtk4::ListBox,
-    db_entries:   Rc<RefCell<Vec<DbEntry>>>,
-    banner:       libadwaita::Banner,
+    parent:        &impl IsA<gtk4::Widget>,
+    store:         Rc<VaultStore>,
+    key:           Rc<Zeroizing<[u8; 32]>>,
+    list:          gtk4::ListBox,
+    db_entries:    Rc<RefCell<Vec<DbEntry>>>,
+    banner:        libadwaita::Banner,
     toast_overlay: ToastOverlay,
-    empty_page:   libadwaita::StatusPage,
+    empty_page:    libadwaita::StatusPage,
 ) {
     let (dialog, toolbar) = make_toolbar_dialog("Nouvelle entrée", 440);
 
@@ -70,20 +81,12 @@ pub fn show_add_dialog(
         .css_classes(["caption", "dim-label"])
         .build();
 
-    let fp = f_pass.clone();
     let sl = strength_lbl.clone();
     f_pass.connect_changed(move |e| {
-        let pw = e.text().to_string();
-        let (bars, label) = match GeneratorConfig::strength_score(&pw) {
-            0 => ("██░░░░░░░░", "Très faible 🔴"),
-            1 => ("████░░░░░░", "Faible 🟠"),
-            2 => ("██████░░░░", "Moyen 🟡"),
-            3 => ("████████░░", "Fort 🟢"),
-            _ => ("██████████", "Excellent ✅"),
-        };
-        sl.set_text(&format!("Force : {} {}", bars, label));
+        sl.set_text(&strength_text(&e.text()));
     });
 
+    let fp = f_pass.clone();
     let gen_btn = Button::with_label("🎲 Générer un mot de passe");
     gen_btn.add_css_class("suggested-action");
     gen_btn.set_margin_top(4);
@@ -122,12 +125,12 @@ pub fn show_add_dialog(
 
     let dlg_a = dialog.clone();
     add_btn.connect_clicked(move |_| {
-        let title    = f_title.text().to_string();
-        let username = f_user.text().to_string();
-        let password = f_pass.text().to_string();
-        let url_str  = f_url.text().to_string();
+        let title     = f_title.text().to_string();
+        let username  = f_user.text().to_string();
+        let password  = f_pass.text().to_string();
+        let url_str   = f_url.text().to_string();
         let notes_str = f_notes.text().to_string();
-        let category = {
+        let category  = {
             let c = f_cat.text().to_string();
             if c.is_empty() { "Général".to_string() } else { c }
         };
@@ -144,7 +147,6 @@ pub fn show_add_dialog(
                 } else {
                     cipher::encrypt(&**key, notes_str.as_bytes()).ok()
                 };
-
                 let new_entry = DbEntry {
                     id:                 Uuid::new_v4().to_string(),
                     title:              title.clone(),
@@ -166,8 +168,7 @@ pub fn show_add_dialog(
                         db_entries.borrow_mut().push(new_entry);
                         let n = db_entries.borrow().len();
                         banner.set_title(&format!(
-                            "🔐 {} entrée{}",
-                            n, if n != 1 { "s" } else { "" }
+                            "🔐 {} entrée{}", n, if n != 1 { "s" } else { "" }
                         ));
                         empty_page.set_visible(false);
                         list.set_visible(true);
@@ -186,15 +187,15 @@ pub fn show_add_dialog(
 // ── DIALOGUE MODIFIER ENTRÉE ──────────────────────────────────────────
 #[allow(clippy::too_many_arguments)]
 pub fn show_edit_dialog(
-    parent:       &impl IsA<gtk4::Widget>,
-    entry:        DbEntry,
-    store:        Rc<VaultStore>,
-    key:          Rc<Zeroizing<[u8; 32]>>,
-    db_entries:   Rc<RefCell<Vec<DbEntry>>>,
-    list:         gtk4::ListBox,
-    banner:       libadwaita::Banner,
+    parent:        &impl IsA<gtk4::Widget>,
+    entry:         DbEntry,
+    store:         Rc<VaultStore>,
+    key:           Rc<Zeroizing<[u8; 32]>>,
+    db_entries:    Rc<RefCell<Vec<DbEntry>>>,
+    list:          gtk4::ListBox,
+    banner:        libadwaita::Banner,
     toast_overlay: ToastOverlay,
-    row:          ListBoxRow,
+    row:           ListBoxRow,
 ) {
     let (dialog, toolbar) = make_toolbar_dialog("Modifier l'entrée", 440);
 
@@ -202,7 +203,6 @@ pub fn show_edit_dialog(
     vbox.set_margin_top(16);   vbox.set_margin_bottom(16);
     vbox.set_margin_start(16); vbox.set_margin_end(16);
 
-    // Déchiffrer le mot de passe pour pré-remplir
     let current_pw = cipher::decrypt(&**key, &entry.password_encrypted)
         .map(|b| String::from_utf8_lossy(&b).to_string())
         .unwrap_or_default();
@@ -222,22 +222,14 @@ pub fn show_edit_dialog(
     let f_notes = EntryRow::builder().title("Notes (optionnel)").text(&current_notes).build();
 
     let strength_lbl = Label::builder()
-        .label("Force : —")
+        .label(&strength_text(&current_pw))
         .halign(gtk4::Align::Start)
         .css_classes(["caption", "dim-label"])
         .build();
 
     let sl2 = strength_lbl.clone();
     f_pass.connect_changed(move |e| {
-        let pw = e.text().to_string();
-        let (bars, label) = match GeneratorConfig::strength_score(&pw) {
-            0 => ("██░░░░░░░░", "Très faible 🔴"),
-            1 => ("████░░░░░░", "Faible 🟠"),
-            2 => ("██████░░░░", "Moyen 🟡"),
-            3 => ("████████░░", "Fort 🟢"),
-            _ => ("██████████", "Excellent ✅"),
-        };
-        sl2.set_text(&format!("Force : {} {}", bars, label));
+        sl2.set_text(&strength_text(&e.text()));
     });
 
     let fp2 = f_pass.clone();
@@ -282,12 +274,12 @@ pub fn show_edit_dialog(
     let dlg_s      = dialog.clone();
 
     save_btn.connect_clicked(move |_| {
-        let title    = f_title.text().to_string();
-        let username = f_user.text().to_string();
-        let password = f_pass.text().to_string();
-        let url_str  = f_url.text().to_string();
+        let title     = f_title.text().to_string();
+        let username  = f_user.text().to_string();
+        let password  = f_pass.text().to_string();
+        let url_str   = f_url.text().to_string();
         let notes_str = f_notes.text().to_string();
-        let category = {
+        let category  = {
             let c = f_cat.text().to_string();
             if c.is_empty() { "Général".to_string() } else { c }
         };
@@ -304,7 +296,6 @@ pub fn show_edit_dialog(
                 } else {
                     cipher::encrypt(&**key, notes_str.as_bytes()).ok()
                 };
-
                 let updated = DbEntry {
                     id:                 entry_id.clone(),
                     title:              title.clone(),
@@ -316,22 +307,17 @@ pub fn show_edit_dialog(
                     created_at,
                     updated_at:         now_unix(),
                 };
-
                 match store.update_entry(&updated) {
                     Ok(_) => {
-                        // Mettre à jour db_entries en mémoire
                         if let Some(e) = db_entries.borrow_mut()
                             .iter_mut().find(|e| e.id == entry_id)
                         {
                             *e = updated.clone();
                         }
-
-                        // Reconstruire la ligne dans la liste
                         let new_row = crate::build_entry_row(
                             &updated, &key, &store,
                             &db_entries, &list, &banner, &toast_overlay,
                         );
-                        // Insérer avant l'ancienne ligne puis supprimer
                         if let Some(idx) = get_row_index(&list, &row) {
                             list.insert(&new_row, idx);
                             list.remove(&row);
@@ -339,7 +325,6 @@ pub fn show_edit_dialog(
                             list.append(&new_row);
                             list.remove(&row);
                         }
-
                         toast_overlay.add_toast(Toast::new("✅ Entrée modifiée !"));
                         gtk4::glib::g_debug!(APP_ID, "Entrée '{}' modifiée", title);
                         dlg_s.close();
@@ -443,9 +428,7 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
         btn_row.upcast_ref(),
     ] { vbox.append(w); }
 
-    let sep = Separator::new(Orientation::Horizontal);
-    sep.set_margin_top(4);
-    vbox.append(&sep);
+    vbox.append(&Separator::new(Orientation::Horizontal));
 
     let close_btn = Button::with_label("Fermer");
     close_btn.set_halign(gtk4::Align::Center);
@@ -470,14 +453,7 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
             digits:    sd.is_active(),
             symbols:   ss.is_active(),
         }.generate();
-        let (bars, label) = match GeneratorConfig::strength_score(&pw) {
-            0 => ("██░░░░░░░░", "Très faible 🔴"),
-            1 => ("████░░░░░░", "Faible 🟠"),
-            2 => ("██████░░░░", "Moyen 🟡"),
-            3 => ("████████░░", "Fort 🟢"),
-            _ => ("██████████", "Excellent ✅"),
-        };
-        sl.set_text(&format!("Force : {} {}", bars, label));
+        sl.set_text(&strength_text(&pw));
         re.set_text(&pw);
     });
 
@@ -532,9 +508,9 @@ pub fn show_settings_dialog(
 
     let sec_list = make_fields_box();
     for (k, v) in &[
-        ("Auto-verrouillage",  "5 minutes"),
-        ("Chiffrement",        "AES-256-GCM"),
-        ("Dérivation de clé",  "Argon2id — OWASP 2024"),
+        ("Auto-verrouillage", "5 minutes"),
+        ("Chiffrement",       "AES-256-GCM"),
+        ("Dérivation de clé", "Argon2id — OWASP 2024"),
     ] {
         let r = GtkBox::new(Orientation::Horizontal, 8);
         r.set_margin_top(10); r.set_margin_bottom(10);
@@ -557,9 +533,9 @@ pub fn show_settings_dialog(
         .build());
 
     let pw_list = make_fields_box();
-    let f_old  = PasswordEntryRow::builder().title("Mot de passe actuel").build();
-    let f_new1 = PasswordEntryRow::builder().title("Nouveau mot de passe").build();
-    let f_new2 = PasswordEntryRow::builder().title("Confirmer le nouveau").build();
+    let f_old   = PasswordEntryRow::builder().title("Mot de passe actuel").build();
+    let f_new1  = PasswordEntryRow::builder().title("Nouveau mot de passe").build();
+    let f_new2  = PasswordEntryRow::builder().title("Confirmer le nouveau").build();
     pw_list.append(&f_old);
     pw_list.append(&f_new1);
     pw_list.append(&f_new2);
@@ -599,10 +575,8 @@ pub fn show_settings_dialog(
             err_ch.set_visible(true);
             return;
         }
-
-        // Vérifier l'ancien mot de passe
         match store_ch.verify_or_init_sentinel(&key_ch) {
-            Ok(true) => {}
+            Ok(true)  => {}
             Ok(false) => {
                 err_ch.set_text("❌ Mot de passe actuel incorrect.");
                 err_ch.set_visible(true);
@@ -614,16 +588,13 @@ pub fn show_settings_dialog(
                 return;
             }
         }
-
-        // Recalculer le sel et re-chiffrer toutes les entrées
         match store_ch.change_master_password(&key_ch, new_pw1.as_bytes()) {
             Ok(_) => {
-                // Reverrouiller l'app pour forcer une reconnexion
                 let login = crate::build_login_screen(win_ch.clone());
                 win_ch.set_content(Some(&login));
                 win_ch.set_default_size(480, 560);
                 win_ch.set_size_request(0, 0);
-                gtk4::glib::g_debug!(APP_ID, "Mot de passe maître changé, reconnexion requise");
+                gtk4::glib::g_debug!(APP_ID, "Mot de passe maître changé");
             }
             Err(e) => {
                 err_ch.set_text(&format!("❌ Impossible de changer le mot de passe : {e}"));
@@ -643,10 +614,10 @@ pub fn show_settings_dialog(
 
     let about_list = make_fields_box();
     for (k, v) in &[
-        ("Application",  "VaultPass"),
-        ("Version",       "0.2.0"),
-        ("Plateforme",    "Linux — GTK4 + Libadwaita"),
-        ("Développeur",   "UbuntuFR"),
+        ("Application", "VaultPass"),
+        ("Version",      "0.2.0"),
+        ("Plateforme",   "Linux — GTK4 + Libadwaita"),
+        ("Développeur",  "UbuntuFR"),
     ] {
         let r = GtkBox::new(Orientation::Horizontal, 8);
         r.set_margin_top(10); r.set_margin_bottom(10);
