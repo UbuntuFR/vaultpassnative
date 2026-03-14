@@ -1,7 +1,7 @@
 app-id: com.vaultpass.VaultPass
-runtime: org.freedesktop.Platform
-runtime-version: '24.08'
-sdk: org.freedesktop.Sdk
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 
@@ -37,7 +37,6 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/vaultpass-native/cargo
-    CARGO_NET_OFFLINE: "false"
 
 modules:
   - name: vaultpass-native
