@@ -26,7 +26,8 @@ finish-args:
   # D-Bus access for system integration
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.secrets
-  - --talk-name=org.freedesktop.Portal
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.freedesktop.portal.FileChooser
 
 build-options:
   build-args:
