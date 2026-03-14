@@ -28,9 +28,6 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   - --talk-name=org.freedesktop.Portal
 
-  # Lock files for security
-  - --lock-file=/run/user/1000/vaultpass.lock
-
 build-options:
   build-args:
     - --share=network
