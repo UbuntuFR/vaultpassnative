@@ -32,8 +32,6 @@ finish-args:
   - --lock-file=/run/user/1000/vaultpass.lock
 
 build-options:
-  build-args:
-    - --share=network
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/vaultpass-native/cargo
