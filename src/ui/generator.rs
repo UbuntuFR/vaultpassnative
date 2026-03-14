@@ -55,12 +55,23 @@ impl GeneratorConfig {
         set[Self::rand_index(set.len())]
     }
 
-    /// Génère un index aléatoire dans [0, len) via OsRng (rejection sampling).
+    /// Génère un index aléatoire dans [0, len) via OsRng.
+    /// Utilise le rejection sampling pour éliminer tout biais de modulo.
     fn rand_index(len: usize) -> usize {
-        assert!(len > 0);
-        let mut buf = [0u8; 8];
-        OsRng.fill_bytes(&mut buf);
-        (u64::from_le_bytes(buf) as usize) % len
+        assert!(len > 0 && len <= u64::MAX as usize);
+        // Calcule la limite supérieure sans biais :
+        // on rejette les valeurs au-delà du plus grand multiple de len.
+        let len64    = len as u64;
+        let limit    = u64::MAX - (u64::MAX % len64) - 1;
+        let mut buf  = [0u8; 8];
+        loop {
+            OsRng.fill_bytes(&mut buf);
+            let v = u64::from_le_bytes(buf);
+            if v <= limit {
+                return (v % len64) as usize;
+            }
+            // Rejet : on tire un nouveau nombre (très rare, < 0.0000000001% par itération)
+        }
     }
 
     /// Fisher-Yates shuffle via OsRng.
@@ -132,5 +143,16 @@ mod tests {
         let pw1 = GeneratorConfig::default().generate();
         let pw2 = GeneratorConfig::default().generate();
         assert_ne!(pw1, pw2);
+    }
+
+    /// Vérifie que rand_index ne produit pas de valeurs hors [0, len)
+    #[test]
+    fn test_rand_index_bounds() {
+        for len in [1usize, 2, 10, 26, 62, 88] {
+            for _ in 0..1000 {
+                let idx = GeneratorConfig::rand_index(len);
+                assert!(idx < len, "rand_index({len}) retourna {idx}");
+            }
+        }
     }
 }

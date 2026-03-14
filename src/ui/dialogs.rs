@@ -8,6 +8,7 @@ use gtk4::{
     Box as GtkBox, Orientation, Button, Label,
     Adjustment, Scale, Switch,
 };
+use gdk4::prelude::DisplayExt;
 use std::rc::Rc;
 use std::cell::RefCell;
 use zeroize::Zeroizing;
@@ -317,10 +318,9 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     copy_btn.connect_clicked(move |b| {
         let pw = re2.text().to_string();
         if !pw.is_empty() {
-            if let Some(d) = b.display().downcast_ref::<gdk4::Display>() {
-                d.clipboard().set_text(&pw);
-                gtk4::glib::g_debug!(APP_ID, "Mot de passe copié depuis le générateur");
-            }
+            let display = DisplayExt::display(b);
+            display.clipboard().set_text(&pw);
+            gtk4::glib::g_debug!(APP_ID, "Mot de passe copié depuis le générateur");
         }
     });
 

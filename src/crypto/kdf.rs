@@ -10,14 +10,13 @@ pub enum KdfError {
     DerivationFailed(String),
 }
 
-/// Newtype pattern : MasterKey n'est PAS un simple Vec<u8>.
-/// Le type distinct empêche de passer accidentellement n'importe quel
-/// Vec<u8> là où une clé maître est attendue.
-/// Zeroizing efface la RAM automatiquement au Drop.
-pub struct MasterKey(pub Zeroizing<Vec<u8>>);
+/// Newtype pattern : MasterKey est un tableau de taille fixe [u8;32],
+/// jamais un Vec de taille inconnue. Zeroizing efface la RAM au Drop.
+pub struct MasterKey(pub Zeroizing<[u8; 32]>);
 
 /// Dérive une clé 256-bit depuis le mot de passe maître via Argon2id.
 /// Paramètres OWASP 2024 : 64 MB RAM, 3 itérations, 4 threads.
+/// Retourne directement un tableau [u8;32] — jamais un Vec de taille ambiguë.
 pub fn derive_master_key(
     password: &[u8],
     salt:     &[u8; 32],
@@ -27,10 +26,10 @@ pub fn derive_master_key(
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut key_bytes = Zeroizing::new(vec![0u8; 32]);
+    let mut key_bytes = Zeroizing::new([0u8; 32]);
 
     argon2
-        .hash_password_into(password, salt, &mut key_bytes)
+        .hash_password_into(password, salt, key_bytes.as_mut())
         .map_err(|e| KdfError::DerivationFailed(e.to_string()))?;
 
     Ok(MasterKey(key_bytes))
@@ -76,5 +75,11 @@ mod tests {
     fn test_salt_length_is_32() {
         let salt = generate_salt();
         assert_eq!(salt.len(), 32);
+    }
+
+    #[test]
+    fn test_key_is_exactly_32_bytes() {
+        let k = derive_master_key(b"test", &[0u8; 32]).unwrap();
+        assert_eq!(k.0.len(), 32);
     }
 }

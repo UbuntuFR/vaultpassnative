@@ -1,4 +1,5 @@
 use gtk4::glib;
+use gdk4::prelude::DisplayExt;
 mod crypto;
 mod database;
 mod ui;
@@ -166,6 +167,8 @@ fn build_ui(app: &Application) {
             }
         };
 
+        // derive_master_key retourne maintenant Zeroizing<[u8;32]> directement—
+        // plus de .clone().try_into() fragile sur un Vec.
         let master_key = match kdf::derive_master_key(password.as_bytes(), &salt_arr) {
             Ok(k)  => k,
             Err(e) => {
@@ -174,16 +177,7 @@ fn build_ui(app: &Application) {
                 return;
             }
         };
-
-        let raw: [u8; 32] = match (*master_key.0).clone().try_into() {
-            Ok(a)  => a,
-            Err(_) => {
-                err_clone.set_text("❌ Clé dérivée invalide.");
-                err_clone.set_visible(true);
-                return;
-            }
-        };
-        let key: Rc<Zeroizing<[u8; 32]>> = Rc::new(Zeroizing::new(raw));
+        let key: Rc<Zeroizing<[u8; 32]>> = Rc::new(master_key.0);
 
         match store.verify_or_init_sentinel(&key) {
             Ok(true)  => {}
@@ -456,10 +450,10 @@ pub fn build_entry_row(
         match cipher::decrypt(&**kc, &enc) {
             Ok(plain) => {
                 let pw = String::from_utf8_lossy(&plain).to_string();
-                if let Some(d) = b.display().downcast_ref::<gdk4::Display>() {
-                    d.clipboard().set_text(&pw);
-                    glib::g_debug!(APP_ID, "Mot de passe copié : {}", tc2);
-                }
+                // Import explicite DisplayExt en tête de fichier — pas de ré-export transitif fragile
+                let display = DisplayExt::display(b);
+                display.clipboard().set_text(&pw);
+                glib::g_debug!(APP_ID, "Mot de passe copié : {}", tc2);
             }
             Err(e) => glib::g_warning!(APP_ID, "Déchiffrement échoué : {}", e),
         }
