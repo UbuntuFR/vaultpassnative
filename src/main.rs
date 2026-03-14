@@ -17,7 +17,7 @@ use gtk4::{
 };
 
 use crypto::{kdf, cipher};
-use database::{store::VaultStore, models::{VaultEntry, EntryId}};
+use database::{store::VaultStore, models::VaultEntry};
 use ui::vault_context::VaultContext;
 use zeroize::Zeroizing;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,17 +56,11 @@ fn build_ui(app: &Application) {
         .default_width(480)
         .default_height(560)
         .build());
-
     window.set_content(Some(&build_login_screen(window.clone())));
-
-    let _autolock = setup_autolock(
-        window.upcast_ref::<gtk4::Window>(),
-        window.clone(),
-    );
+    let _autolock = setup_autolock(window.upcast_ref::<gtk4::Window>(), window.clone());
     window.present();
 }
 
-// ── Couleur déterministe par première lettre ──────────────────────────────────
 fn initial_color(title: &str) -> &'static str {
     const COLORS: &[&str] = &[
         "#e74c3c", "#e67e22", "#f1c40f", "#2ecc71",
@@ -77,14 +71,12 @@ fn initial_color(title: &str) -> &'static str {
     COLORS[idx]
 }
 
-/// Construit une ligne d'entrée. Prend un `VaultContext` au lieu de 7 paramètres.
 pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     let row     = ListBoxRow::new();
     let row_box = GtkBox::new(Orientation::Horizontal, 12);
     row_box.set_margin_top(10);  row_box.set_margin_bottom(10);
     row_box.set_margin_start(8); row_box.set_margin_end(8);
 
-    // Avatar coloré
     let initial = entry.title.chars().next()
         .unwrap_or('?').to_uppercase().next().unwrap_or('?');
     let color   = initial_color(&entry.title);
@@ -102,7 +94,6 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     );
     row_box.append(&avatar);
 
-    // Titre + identifiant
     let info = GtkBox::new(Orientation::Vertical, 2);
     info.append(&Label::builder().label(entry.title.as_str())
         .halign(gtk4::Align::Start).css_classes(["heading"]).build());
@@ -115,7 +106,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     cat_lbl.add_css_class("tag");
     row_box.append(&cat_lbl);
 
-    // ── Copier ──
+    // Copier
     let copy_btn = Button::from_icon_name("edit-copy-symbolic");
     copy_btn.add_css_class("flat");
     copy_btn.set_tooltip_text(Some("Copier le mot de passe"));
@@ -124,7 +115,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     let title = entry.title.clone();
     let to1   = ctx.toast.clone();
     copy_btn.connect_clicked(move |b| {
-        match cipher::decrypt(&**kc, &enc) {
+        match cipher::decrypt(kc.as_ref(), &enc) {
             Ok(plain) => {
                 b.display().clipboard().set_text(&String::from_utf8_lossy(&plain));
                 to1.add_toast(Toast::new("✅ Mot de passe copié !"));
@@ -135,7 +126,7 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     });
     row_box.append(&copy_btn);
 
-    // ── Modifier ──
+    // Modifier
     let edit_btn = Button::from_icon_name("document-edit-symbolic");
     edit_btn.add_css_class("flat");
     edit_btn.set_tooltip_text(Some("Modifier"));
@@ -145,19 +136,17 @@ pub fn build_entry_row(entry: &VaultEntry, ctx: &VaultContext) -> ListBoxRow {
     edit_btn.connect_clicked(move |btn| {
         ui::dialogs::show_edit_dialog(
             btn.upcast_ref::<gtk4::Widget>(),
-            entry_e.clone(),
-            ctx_e.clone(),
-            row_e.clone(),
+            entry_e.clone(), ctx_e.clone(), row_e.clone(),
         );
     });
     row_box.append(&edit_btn);
 
-    // ── Supprimer ──
+    // Supprimer
     let del_btn = Button::from_icon_name("user-trash-symbolic");
     del_btn.add_css_class("flat");
     del_btn.add_css_class("destructive-action");
     del_btn.set_tooltip_text(Some("Supprimer"));
-    let eid   = entry.id.clone();
+    let eid    = entry.id.clone();
     let etitle = entry.title.clone();
     let ctx_d  = ctx.clone();
     let rw     = row.clone();
@@ -189,11 +178,8 @@ fn build_vault(
     key:    Rc<Zeroizing<[u8; 32]>>,
     window: Rc<ApplicationWindow>,
 ) -> ToolbarView {
-    let db_entries = Rc::new(RefCell::new(
-        store.list_entries().unwrap_or_default()
-    ));
+    let db_entries = Rc::new(RefCell::new(store.list_entries().unwrap_or_default()));
 
-    // ── Sidebar ──────────────────────────────────────────────────────────────
     let sidebar_box    = GtkBox::new(Orientation::Vertical, 0);
     let sidebar_header = HeaderBar::new();
     sidebar_header.set_show_end_title_buttons(false);
@@ -219,8 +205,7 @@ fn build_vault(
         let row = ListBoxRow::new();
         row.set_child(Some(&Label::builder()
             .label(*cat).halign(gtk4::Align::Start)
-            .margin_start(12).margin_top(8).margin_bottom(8)
-            .build()));
+            .margin_start(12).margin_top(8).margin_bottom(8).build()));
         category_list.append(&row);
     }
     category_list.select_row(category_list.row_at_index(0).as_ref());
@@ -233,8 +218,7 @@ fn build_vault(
     sr.set_child(Some(&Label::builder()
         .label("⚙️  Paramètres")
         .halign(gtk4::Align::Start)
-        .margin_start(12).margin_top(8).margin_bottom(8)
-        .build()));
+        .margin_start(12).margin_top(8).margin_bottom(8).build()));
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
@@ -248,7 +232,6 @@ fn build_vault(
         );
     });
 
-    // ── Contenu ───────────────────────────────────────────────────────────────
     let content_box    = GtkBox::new(Orientation::Vertical, 0);
     content_box.set_vexpand(true);
     let content_header = HeaderBar::new();
@@ -287,8 +270,8 @@ fn build_vault(
     let entries_list = ListBox::new();
     entries_list.set_selection_mode(SelectionMode::None);
     entries_list.add_css_class("boxed-list");
-    entries_list.set_margin_top(12);    entries_list.set_margin_bottom(12);
-    entries_list.set_margin_start(16);  entries_list.set_margin_end(16);
+    entries_list.set_margin_top(12);   entries_list.set_margin_bottom(12);
+    entries_list.set_margin_start(16); entries_list.set_margin_end(16);
 
     let empty_page = StatusPage::new();
     empty_page.set_icon_name(Some("dialog-password-symbolic"));
@@ -296,7 +279,6 @@ fn build_vault(
     empty_page.set_description(Some("Cliquez sur + pour ajouter votre premier mot de passe"));
     empty_page.set_vexpand(true);
 
-    // ── Contexte partagé ──────────────────────────────────────────────────────
     let ctx = VaultContext::new(
         store.clone(), key.clone(), db_entries.clone(),
         entries_list.clone(), banner.clone(),
@@ -316,7 +298,7 @@ fn build_vault(
     toast_overlay.set_child(Some(&scroll));
     content_box.append(&toast_overlay);
 
-    // ── Tri A↔Z ───────────────────────────────────────────────────────────────
+    // Tri A↔Z
     let sort_asc = Rc::new(RefCell::new(true));
     let ctx_sort = ctx.clone();
     sort_btn.connect_clicked(move |_| {
@@ -338,14 +320,13 @@ fn build_vault(
         ctx_sort.refresh_empty_state();
     });
 
-    // ── Filtre catégorie + recherche ─────────────────────────────────────────
+    // Filtre
     let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
     let ctx_f  = ctx.clone();
     let cat_f  = cat_filter.clone();
     let srch_f = search_filter.clone();
-
     let apply_filter = Rc::new(move || {
         let cat = cat_f.borrow().clone();
         let q   = srch_f.borrow().to_lowercase();
@@ -389,7 +370,6 @@ fn build_vault(
         af2();
     });
 
-    // ── Verrouiller ───────────────────────────────────────────────────────────
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
         wl.set_content(Some(&build_login_screen(wl.clone())));
@@ -397,23 +377,17 @@ fn build_vault(
         wl.set_size_request(0, 0);
     });
 
-    // ── Générateur ────────────────────────────────────────────────────────────
     let wg = window.clone();
     gen_btn.connect_clicked(move |_| {
         ui::dialogs::show_generator_dialog(wg.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── Nouvelle entrée ───────────────────────────────────────────────────────
     let ctx_add = ctx.clone();
     let wa      = window.clone();
     add_btn.connect_clicked(move |_| {
-        ui::dialogs::show_add_dialog(
-            wa.upcast_ref::<gtk4::Widget>(),
-            ctx_add.clone(),
-        );
+        ui::dialogs::show_add_dialog(wa.upcast_ref::<gtk4::Widget>(), ctx_add.clone());
     });
 
-    // ── NavigationSplitView ───────────────────────────────────────────────────
     let split_view = NavigationSplitView::new();
     split_view.set_sidebar(Some(&NavigationPage::new(&sidebar_box, "Catégories")));
     split_view.set_content(Some(&NavigationPage::new(&content_box, "Entrées")));
@@ -439,8 +413,8 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     let login_box = GtkBox::new(Orientation::Vertical, 24);
     login_box.set_valign(gtk4::Align::Center);
     login_box.set_halign(gtk4::Align::Center);
-    login_box.set_margin_top(48);    login_box.set_margin_bottom(48);
-    login_box.set_margin_start(48);  login_box.set_margin_end(48);
+    login_box.set_margin_top(48);   login_box.set_margin_bottom(48);
+    login_box.set_margin_start(48); login_box.set_margin_end(48);
 
     let status = StatusPage::new();
     status.set_icon_name(Some("dialog-password-symbolic"));
@@ -475,9 +449,9 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     login_box.append(&hint);
     login_toolbar.set_content(Some(&login_box));
 
-    let err   = error_lbl.clone();
-    let pw    = pw_entry.clone();
-    let win   = window.clone();
+    let err = error_lbl.clone();
+    let pw  = pw_entry.clone();
+    let win = window.clone();
 
     let do_unlock = Rc::new(move || {
         let password = pw.text().to_string();
@@ -533,7 +507,6 @@ pub fn build_login_screen(window: Rc<ApplicationWindow>) -> ToolbarView {
     unlock_btn.connect_clicked(move |_| du1());
     let du2 = do_unlock.clone();
     pw_entry.connect_activate(move |_| du2());
-
     login_toolbar
 }
 

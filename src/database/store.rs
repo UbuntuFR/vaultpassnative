@@ -30,7 +30,6 @@ impl VaultStore {
         Ok(store)
     }
 
-    /// Base en mémoire pour les tests.
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn  = Connection::open_in_memory()?;
@@ -104,18 +103,12 @@ impl VaultStore {
         match existing {
             None => {
                 let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
-                self.conn.execute(
-                    "UPDATE vault_meta SET sentinel=?1 WHERE id=1",
-                    params![enc],
-                )?;
+                self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
                 Ok(true)
             }
             Some(ref blob) if blob.is_empty() => {
                 let enc = encrypt(&**key, SENTINEL_PLAINTEXT)?;
-                self.conn.execute(
-                    "UPDATE vault_meta SET sentinel=?1 WHERE id=1",
-                    params![enc],
-                )?;
+                self.conn.execute("UPDATE vault_meta SET sentinel=?1 WHERE id=1", params![enc])?;
                 Ok(true)
             }
             Some(blob) => Ok(
@@ -152,9 +145,7 @@ impl VaultStore {
                 entry.updated_at, entry.id,
             ],
         )?;
-        if rows == 0 {
-            return Err(StoreError::NotFound(entry.id.to_string()));
-        }
+        if rows == 0 { return Err(StoreError::NotFound(entry.id.to_string())); }
         Ok(())
     }
 
@@ -176,19 +167,13 @@ impl VaultStore {
                 created_at:         row.get(7)?,
                 updated_at:         row.get(8)?,
             })
-        })?
-        .collect::<SqlResult<Vec<_>>>()?;
+        })?.collect::<SqlResult<Vec<_>>>()?;
         Ok(entries)
     }
 
     pub fn delete_entry(&self, id: &EntryId) -> Result<(), StoreError> {
-        let rows = self.conn.execute(
-            "DELETE FROM entries WHERE id=?1",
-            params![id],
-        )?;
-        if rows == 0 {
-            return Err(StoreError::NotFound(id.to_string()));
-        }
+        let rows = self.conn.execute("DELETE FROM entries WHERE id=?1", params![id])?;
+        if rows == 0 { return Err(StoreError::NotFound(id.to_string())); }
         Ok(())
     }
 
@@ -202,20 +187,13 @@ impl VaultStore {
             .map_err(|e| StoreError::Kdf(e.to_string()))?;
         let new_key    = new_master.0;
 
-        let entries = self.list_entries()?;
-        for e in &entries {
-            let plain_pw   = decrypt(&**old_key, &e.password_encrypted)
-                .map_err(StoreError::Cipher)?;
+        for e in &self.list_entries()? {
+            let plain_pw   = decrypt(&**old_key, &e.password_encrypted).map_err(StoreError::Cipher)?;
             let new_pw_enc = encrypt(&*new_key, &plain_pw)?;
-
             let new_notes_enc = match &e.notes_encrypted {
-                Some(enc) => {
-                    let plain = decrypt(&**old_key, enc).map_err(StoreError::Cipher)?;
-                    Some(encrypt(&*new_key, &plain)?)
-                }
-                None => None,
+                Some(enc) => Some(encrypt(&*new_key, &decrypt(&**old_key, enc).map_err(StoreError::Cipher)?)? ),
+                None      => None,
             };
-
             self.conn.execute(
                 "UPDATE entries SET password_encrypted=?1, notes_encrypted=?2 WHERE id=?3",
                 params![new_pw_enc, new_notes_enc, e.id],
@@ -231,24 +209,21 @@ impl VaultStore {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::crypto::{cipher, kdf};
 
     fn make_key() -> Zeroizing<[u8; 32]> {
-        let salt = kdf::generate_salt();
-        kdf::derive_master_key(b"test_password", &salt).unwrap().0
+        kdf::derive_master_key(b"test_password", &kdf::generate_salt()).unwrap().0
     }
 
     fn make_entry(key: &Zeroizing<[u8; 32]>) -> VaultEntry {
-        let enc = cipher::encrypt(&**key, b"secret123").unwrap();
         VaultEntry {
             id:                 EntryId::new(),
             title:              "GitHub".to_string(),
             username:           "user@example.com".to_string(),
-            password_encrypted: enc,
+            password_encrypted: cipher::encrypt(key.as_ref(), b"secret123").unwrap(),
             url:                Some("https://github.com".to_string()),
             category:           "Pro".to_string(),
             notes_encrypted:    None,
@@ -261,8 +236,7 @@ mod tests {
     fn test_insert_and_list() {
         let store = VaultStore::open_in_memory().unwrap();
         let key   = make_key();
-        let entry = make_entry(&key);
-        store.insert_entry(&entry).unwrap();
+        store.insert_entry(&make_entry(&key)).unwrap();
         let list  = store.list_entries().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "GitHub");
@@ -270,14 +244,13 @@ mod tests {
 
     #[test]
     fn test_update_entry() {
-        let store = VaultStore::open_in_memory().unwrap();
-        let key   = make_key();
+        let store     = VaultStore::open_in_memory().unwrap();
+        let key       = make_key();
         let mut entry = make_entry(&key);
         store.insert_entry(&entry).unwrap();
         entry.title = "GitLab".to_string();
         store.update_entry(&entry).unwrap();
-        let list  = store.list_entries().unwrap();
-        assert_eq!(list[0].title, "GitLab");
+        assert_eq!(store.list_entries().unwrap()[0].title, "GitLab");
     }
 
     #[test]
@@ -302,8 +275,7 @@ mod tests {
     fn test_update_nonexistent_returns_error() {
         let store = VaultStore::open_in_memory().unwrap();
         let key   = make_key();
-        let entry = make_entry(&key);
-        assert!(matches!(store.update_entry(&entry), Err(StoreError::NotFound(_))));
+        assert!(matches!(store.update_entry(&make_entry(&key)), Err(StoreError::NotFound(_))));
     }
 
     #[test]
@@ -311,8 +283,7 @@ mod tests {
         let store = VaultStore::open_in_memory().unwrap();
         let salt  = kdf::generate_salt();
         store.save_salt(&salt).unwrap();
-        let loaded = store.load_salt().unwrap().unwrap();
-        assert_eq!(loaded, salt.as_ref());
+        assert_eq!(store.load_salt().unwrap().unwrap(), salt.as_ref());
     }
 
     #[test]
@@ -327,10 +298,10 @@ mod tests {
 
     #[test]
     fn test_sentinel_wrong_key_fails() {
-        let store  = VaultStore::open_in_memory().unwrap();
-        let salt   = kdf::generate_salt();
-        let key1   = kdf::derive_master_key(b"correct", &salt).unwrap().0;
-        let key2   = kdf::derive_master_key(b"wrong",   &salt).unwrap().0;
+        let store = VaultStore::open_in_memory().unwrap();
+        let salt  = kdf::generate_salt();
+        let key1  = kdf::derive_master_key(b"correct", &salt).unwrap().0;
+        let key2  = kdf::derive_master_key(b"wrong",   &salt).unwrap().0;
         store.save_salt(&salt).unwrap();
         store.verify_or_init_sentinel(&key1).unwrap();
         assert!(!store.verify_or_init_sentinel(&key2).unwrap());
@@ -343,31 +314,25 @@ mod tests {
         let key   = kdf::derive_master_key(b"old_pass", &salt).unwrap().0;
         store.save_salt(&salt).unwrap();
         store.verify_or_init_sentinel(&key).unwrap();
-
-        let entry = make_entry(&key);
-        store.insert_entry(&entry).unwrap();
+        store.insert_entry(&make_entry(&key)).unwrap();
         store.change_master_password(&key, b"new_pass").unwrap();
-
-        let new_salt   = store.load_salt().unwrap().unwrap();
-        let new_salt_arr: [u8; 32] = new_salt.try_into().unwrap();
-        let new_key    = kdf::derive_master_key(b"new_pass", &new_salt_arr).unwrap().0;
+        let new_salt: [u8; 32] = store.load_salt().unwrap().unwrap().try_into().unwrap();
+        let new_key  = kdf::derive_master_key(b"new_pass", &new_salt).unwrap().0;
         assert!(store.verify_or_init_sentinel(&new_key).unwrap());
-
-        let entries = store.list_entries().unwrap();
-        let plain   = cipher::decrypt(&*new_key, &entries[0].password_encrypted).unwrap();
+        let entries  = store.list_entries().unwrap();
+        let plain    = cipher::decrypt(new_key.as_ref(), &entries[0].password_encrypted).unwrap();
         assert_eq!(&*plain, b"secret123");
     }
 
     #[test]
     fn test_notes_encrypted_roundtrip() {
-        let store  = VaultStore::open_in_memory().unwrap();
-        let key    = make_key();
-        let notes  = cipher::encrypt(&**key, b"notes secretes").unwrap();
-        let mut e  = make_entry(&key);
-        e.notes_encrypted = Some(notes);
+        let store = VaultStore::open_in_memory().unwrap();
+        let key   = make_key();
+        let mut e = make_entry(&key);
+        e.notes_encrypted = Some(cipher::encrypt(key.as_ref(), b"notes secretes").unwrap());
         store.insert_entry(&e).unwrap();
-        let list   = store.list_entries().unwrap();
-        let dec    = cipher::decrypt(&**key, list[0].notes_encrypted.as_ref().unwrap()).unwrap();
+        let list  = store.list_entries().unwrap();
+        let dec   = cipher::decrypt(key.as_ref(), list[0].notes_encrypted.as_ref().unwrap()).unwrap();
         assert_eq!(&*dec, b"notes secretes");
     }
 }

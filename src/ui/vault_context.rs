@@ -1,12 +1,11 @@
 //! Struct contexte partagé dans tout le vault.
-//! Remplace les 7 paramètres répétés dans chaque fonction de build_entry_row.
 use std::cell::RefCell;
 use std::rc::Rc;
 use zeroize::Zeroizing;
+use gtk4::prelude::WidgetExt;
 use libadwaita::{Banner, ToastOverlay};
 use crate::database::{store::VaultStore, models::VaultEntry};
 
-/// Contexte partagé (Rc, pas thread-safe — UI GTK single-thread).
 #[derive(Clone)]
 pub struct VaultContext {
     pub store:        Rc<VaultStore>,
@@ -31,7 +30,6 @@ impl VaultContext {
         Self { store, key, db_entries, entries_list, banner, toast, empty_page }
     }
 
-    /// Met à jour le compteur dans la bannière.
     pub fn refresh_banner(&self) {
         let n = self.db_entries.borrow().len();
         self.banner.set_title(&format!(
@@ -39,8 +37,8 @@ impl VaultContext {
         ));
     }
 
-    /// Affiche ou masque la liste / état vide selon le nombre d'entrées.
     pub fn refresh_empty_state(&self) {
+        use gtk4::prelude::WidgetExt as _;
         let n = self.db_entries.borrow().len();
         self.empty_page.set_visible(n == 0);
         self.entries_list.set_visible(n > 0);
