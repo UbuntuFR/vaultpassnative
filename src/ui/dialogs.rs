@@ -21,9 +21,6 @@ use uuid::Uuid;
 
 const APP_ID: &str = "io.github.UbuntuFR.VaultpassNative";
 
-// ────────────────────────────────────────────────────────────────────
-// DIALOGUE NOUVELLE ENTRÉE — AdwDialog (GTK 4.14 / GNOME 49)
-// ────────────────────────────────────────────────────────────────────
 pub fn show_add_dialog(
     parent:     &impl IsA<gtk4::Widget>,
     store:      Rc<VaultStore>,
@@ -161,9 +158,6 @@ pub fn show_add_dialog(
     });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// DIALOGUE CONFIRMATION SUPPRESSION — AdwAlertDialog
-// ────────────────────────────────────────────────────────────────────
 pub fn show_delete_confirm(
     parent:     &impl IsA<gtk4::Widget>,
     title:      &str,
@@ -189,9 +183,6 @@ pub fn show_delete_confirm(
     alert.present(Some(parent));
 }
 
-// ────────────────────────────────────────────────────────────────────
-// DIALOGUE GÉNÉRATEUR DE MOTS DE PASSE — AdwDialog
-// ────────────────────────────────────────────────────────────────────
 pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     let dialog = AdwDialog::builder()
         .title("🎲 Générateur de mots de passe")
@@ -318,8 +309,8 @@ pub fn show_generator_dialog(parent: &impl IsA<gtk4::Widget>) {
     copy_btn.connect_clicked(move |b| {
         let pw = re2.text().to_string();
         if !pw.is_empty() {
-            let display = DisplayExt::display(b);
-            display.clipboard().set_text(&pw);
+            // .display() disponible via use gdk4::prelude::DisplayExt en tête
+            b.display().clipboard().set_text(&pw);
             gtk4::glib::g_debug!(APP_ID, "Mot de passe copié depuis le générateur");
         }
     });

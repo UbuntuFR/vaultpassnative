@@ -167,8 +167,6 @@ fn build_ui(app: &Application) {
             }
         };
 
-        // derive_master_key retourne maintenant Zeroizing<[u8;32]> directement—
-        // plus de .clone().try_into() fragile sur un Vec.
         let master_key = match kdf::derive_master_key(password.as_bytes(), &salt_arr) {
             Ok(k)  => k,
             Err(e) => {
@@ -217,7 +215,6 @@ fn build_vault(
         store.list_entries().unwrap_or_default()
     ));
 
-    // ── SIDEBAR ──────────────────────────────────────────────────
     let sidebar_box = GtkBox::new(Orientation::Vertical, 0);
     sidebar_box.set_width_request(220);
 
@@ -266,8 +263,7 @@ fn build_vault(
     settings_list.append(&sr);
     sidebar_box.append(&settings_list);
 
-    // ── CONTENU ──────────────────────────────────────────────────
-    let content_box = GtkBox::new(Orientation::Vertical, 0);
+    let content_box    = GtkBox::new(Orientation::Vertical, 0);
     let content_header = HeaderBar::new();
 
     let search = SearchEntry::new();
@@ -306,7 +302,6 @@ fn build_vault(
         entries_list.append(&row);
     }
 
-    // ── Filtre catégorie + recherche (logique centralisée) ──
     let cat_filter:    Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let search_filter: Rc<RefCell<String>>         = Rc::new(RefCell::new(String::new()));
 
@@ -361,7 +356,6 @@ fn build_vault(
         af2();
     });
 
-    // ── Verrouiller ──
     let st = stack.clone();
     let wl = window.clone();
     lock_btn.connect_clicked(move |_| {
@@ -371,13 +365,11 @@ fn build_vault(
         glib::g_debug!(APP_ID, "Coffre verrouillé manuellement");
     });
 
-    // ── Générateur ──
     let wg = window.clone();
     gen_btn.connect_clicked(move |_| {
         ui::dialogs::show_generator_dialog(wg.upcast_ref::<gtk4::Widget>());
     });
 
-    // ── Nouvelle entrée ──
     let st2  = store.clone();
     let ka   = key_bytes.clone();
     let el_a = entries_list.clone();
@@ -439,7 +431,6 @@ pub fn build_entry_row(
     cat_lbl.add_css_class("tag");
     row_box.append(&cat_lbl);
 
-    // Bouton copier
     let copy_btn = Button::from_icon_name("edit-copy-symbolic");
     copy_btn.add_css_class("flat");
     copy_btn.set_tooltip_text(Some("Copier le mot de passe"));
@@ -450,9 +441,8 @@ pub fn build_entry_row(
         match cipher::decrypt(&**kc, &enc) {
             Ok(plain) => {
                 let pw = String::from_utf8_lossy(&plain).to_string();
-                // Import explicite DisplayExt en tête de fichier — pas de ré-export transitif fragile
-                let display = DisplayExt::display(b);
-                display.clipboard().set_text(&pw);
+                // .display() disponible via use gdk4::prelude::DisplayExt en tête
+                b.display().clipboard().set_text(&pw);
                 glib::g_debug!(APP_ID, "Mot de passe copié : {}", tc2);
             }
             Err(e) => glib::g_warning!(APP_ID, "Déchiffrement échoué : {}", e),
@@ -460,7 +450,6 @@ pub fn build_entry_row(
     });
     row_box.append(&copy_btn);
 
-    // Bouton supprimer
     let del_btn = Button::from_icon_name("user-trash-symbolic");
     del_btn.add_css_class("flat");
     del_btn.add_css_class("destructive-action");
