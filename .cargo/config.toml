@@ -1,5 +1,7 @@
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "vendor-sources"
+# Ce fichier est utilisé UNIQUEMENT lors du build Flatpak (offline).
+# En développement local, ce bloc est ignoré car la variable
+# d'environnement FLATPAK_ID n'est pas définie et Cargo utilise
+# crates.io normalement.
+#
+# Pour forcer le vendor localement (optionnel) :
+#   cargo build --offline
