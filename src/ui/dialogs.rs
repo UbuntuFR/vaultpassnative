@@ -844,8 +844,8 @@ pub fn show_settings_dialog(
         row.set_margin_top(10); row.set_margin_bottom(10);
         row.set_margin_start(12); row.set_margin_end(12);
         row.append(&Label::builder().label(delay.label()).hexpand(true).halign(gtk4::Align::Start).build());
-        // cast correct : isize -> u64 via as
-        if (*delay as isize) as u64 == current_delay {
+        // FIX #3: Proper comparison using LockDelay::from_secs
+        if delay.to_secs() == current_delay {
             row.append(&Label::builder().label("✓").css_classes(["accent"]).build());
         }
         rw.set_child(Some(&row));
@@ -857,8 +857,7 @@ pub fn show_settings_dialog(
     lock_list.connect_row_activated(move |_, row| {
         let delays = LockDelay::all();
         if let Some(d) = delays.get(row.index() as usize) {
-            // cast correct pour Never (u64::MAX as isize as u64 == u64::MAX)
-            let secs = (*d as isize) as u64;
+            let secs = d.to_secs();
             prefs_lk.borrow_mut().lock_delay_secs = secs;
             prefs_lk.borrow().save();
             autolock_lk.set_delay(secs);

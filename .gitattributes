@@ -1,0 +1,23 @@
+# Git attributes for VaultPass Native
+# Security-focused configuration
+
+# Deny committing sensitive files
+.env                    linguist-documentation=false
+*.pem                   linguist-documentation=false
+*.key                   linguist-documentation=false
+id_rsa*                 linguist-documentation=false
+id_ed25519*             linguist-documentation=false
+
+# Auto-detect language
+*.rs                    linguist-language=Rust
+*.toml                  linguist-language=TOML
+
+# Binary files
+*.db                    binary
+*.db-journal            binary
+
+# Documentation
+*.md                    linguist-documentation=true
+
+# Hide implementation details from language stats
+src/crypto/*            linguist-vendored
